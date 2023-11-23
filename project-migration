@@ -186,41 +186,53 @@ if [ "$TYPE" = "wg" ]; then
 	fi
 fi
 
-# get the area id
-roadmap_area_value_id=$(echo $roadmap_area | jq -r ".options[] | select(.name | startswith(\"${AREA}\")) | .id")
-if [ "$roadmap_area_value_id" = "" ]; then
-	echo "Area '${AREA}' not found in roadmap."
-	FIELD_ABORT=true
+if [ "$AREA" != "" ]; then
+	# get the area id
+	roadmap_area_value_id=$(echo $roadmap_area | jq -r ".options[] | select(.name | startswith(\"${AREA}\")) | .id")
+	if [ "$roadmap_area_value_id" = "" ]; then
+		echo "Area '${AREA}' not found in roadmap."
+		FIELD_ABORT=true
+	fi
 fi
 
 # get the function id
-roadmap_function_value_id=$(echo $roadmap_function | jq -r ".options[] | select(.name | startswith(\"${FUNCTION}\")) | .id")
-if [ "$roadmap_function_value_id" = "" ]; then
-	echo "Function '${FUNCTION}' not found in roadmap."
-	FIELD_ABORT=true
+if [ "$FUNCTION" != "" ]; then
+	roadmap_function_value_id=$(echo $roadmap_function | jq -r ".options[] | select(.name | startswith(\"${FUNCTION}\")) | .id")
+	if [ "$roadmap_function_value_id" = "" ]; then
+		echo "Function '${FUNCTION}' not found in roadmap."
+		FIELD_ABORT=true
+	fi
 fi
 
-if [ FIELD_ABORT ]; then
+if $FIELD_ABORT; then
 	echo "There are fields in the project board that are not in the roadmap board. Please add or change the fields."
 	exit
 fi
 
 # get all issues from the team board
-items=$(gh project item-list $PROJECT --owner giantswarm --format json)
+items=$(gh project item-list $PROJECT $APPEND_FLAGS)
 
 for item in $(echo "${items}" | jq -r '.items[] | @base64'); do
 	_jq() {
-		echo ${item} | base64 --decode | jq -r ${1}
+		echo ${item} | base64 --decode | jq -r "${1}"
 	}
 
+	# skip if DraftIssue
+	if [ "$(_jq '.content.type')" = "DraftIssue" ]; then
+		echo "Skip note: $(_jq '.content.title')"
+		continue
+	fi
+
 	# add issue to the roadmap board
+	echo "Add issue $(_jq '.title') to the roadmap board"
 	ITEM_ID=$(gh project item-add $ROADMAP \
 		--owner giantswarm \
 		--format json \
-		--url $(_jq '.url') | jq -r '.id')
+		--url $(_jq '.content.url') | jq -r '.id')
 
 	# add team field or sig or wg
 	if [ "$TYPE" = "team" ]; then
+		echo "Edit team field"
 		gh project item-edit \
 			--project-id $ROADMAP_PROJECT_ID \
 			--id $ITEM_ID \
@@ -229,6 +241,7 @@ for item in $(echo "${items}" | jq -r '.items[] | @base64'); do
 	fi
 
 	if [ "$TYPE" = "sig" ]; then
+		echo "Edit sig field"
 		gh project item-edit \
 			--project-id $ROADMAP_PROJECT_ID \
 			--id $ITEM_ID \
@@ -237,6 +250,7 @@ for item in $(echo "${items}" | jq -r '.items[] | @base64'); do
 	fi
 
 	if [ "$TYPE" = "wg" ]; then
+		echo "Eidt wg field"
 		gh project item-edit \
 			--project-id $ROADMAP_PROJECT_ID \
 			--id $ITEM_ID \
@@ -245,27 +259,34 @@ for item in $(echo "${items}" | jq -r '.items[] | @base64'); do
 	fi
 
 	# add area field
-	gh project item-edit \
-		--project-id $ROADMAP_PROJECT_ID \
-		--id $ITEM_ID \
-		--field-id $roadmap_area_id \
-		--single-select-option-id $roadmap_area_value_id
+	if [ "$AREA" != "" ]; then
+		echo "Edit area field"
+		gh project item-edit \
+			--project-id $ROADMAP_PROJECT_ID \
+			--id $ITEM_ID \
+			--field-id $roadmap_area_id \
+			--single-select-option-id $roadmap_area_value_id
+	fi
 
 	# add function field
-	gh project item-edit \
-		--project-id $ROADMAP_PROJECT_ID \
-		--id $ITEM_ID \
-		--field-id $roadmap_function_id \
-		--single-select-option-id $roadmap_function_value_id
+	if [ "$FUNCTION" != "" ]; then
+		echo "Edit function field"
+		gh project item-edit \
+			--project-id $ROADMAP_PROJECT_ID \
+			--id $ITEM_ID \
+			--field-id $roadmap_function_id \
+			--single-select-option-id $roadmap_function_value_id
+	fi
 
 	# add status
 	status=$(_jq '.status')
-	if [ "$status" != "" ]; then
+	if [ "$status" != "null" ]; then
 		roadmap_status_value_id=$(echo $roadmap_status | jq -r ".options[] | select(.name == \"${status}\") | .id")
 		if [ "$roadmap_status_value_id" = "" ]; then
-			echo "Item $item failed. Status '$(_jq '.status')' not found in roadmap."
+			echo "Status '$(_jq '.status')' not found in roadmap."
 			continue
 		fi
+		echo "Edit status field"
 		gh project item-edit \
 			--project-id $ROADMAP_PROJECT_ID \
 			--id $ITEM_ID \
@@ -275,12 +296,13 @@ for item in $(echo "${items}" | jq -r '.items[] | @base64'); do
 
 	# add kind
 	kind=$(_jq '.kind')
-	if [ "$kind" != "" ]; then
+	if [ "$kind" != "null" ]; then
 		roadmap_kind_value_id=$(echo $roadmap_kind | jq -r ".options[] | select(.name == \"${kind}\") | .id")
 		if [ "$roadmap_kind_value_id" = "" ]; then
-			echo "Item $item failed. kind '$(_jq '.kind')' not found in roadmap."
+			echo "Kind '$(_jq '.kind')' not found in roadmap."
 			continue
 		fi
+		echo "Edit kind field"
 		gh project item-edit \
 			--project-id $ROADMAP_PROJECT_ID \
 			--id $ITEM_ID \
@@ -290,12 +312,13 @@ for item in $(echo "${items}" | jq -r '.items[] | @base64'); do
 
 	# add workstream
 	workstream=$(_jq '.workstream')
-	if [ "$workstream" != "" ]; then
+	if [ "$workstream" != "null" ]; then
 		roadmap_workstream_value_id=$(echo $roadmap_workstream | jq -r ".options[] | select(.name == \"${workstream}\") | .id")
 		if [ "$roadmap_workstream_value_id" = "" ]; then
-			echo "Item $item failed. workstream '$(_jq '.workstream')' not found in roadmap."
+			echo "Workstream '$(_jq '.workstream')' not found in roadmap."
 			continue
 		fi
+		echo "Edit workstream field"
 		gh project item-edit \
 			--project-id $ROADMAP_PROJECT_ID \
 			--id $ITEM_ID \
@@ -305,7 +328,8 @@ for item in $(echo "${items}" | jq -r '.items[] | @base64'); do
 
 	# add start date
 	startdate=$(_jq '."start Date"')
-	if [ "$startdate" != "" ]; then
+	if [ "$startdate" != "null" ]; then
+		echo "Edit start date field"
 		gh project item-edit \
 			--project-id $ROADMAP_PROJECT_ID \
 			--id $ITEM_ID \
@@ -315,7 +339,8 @@ for item in $(echo "${items}" | jq -r '.items[] | @base64'); do
 
 	# add target date
 	targetdate=$(_jq '."target Date"')
-	if [ "$targetdate" != "" ]; then
+	if [ "$targetdate" != "null" ]; then
+		echo "Edit target date field"
 		gh project item-edit \
 			--project-id $ROADMAP_PROJECT_ID \
 			--id $ITEM_ID \
@@ -324,8 +349,8 @@ for item in $(echo "${items}" | jq -r '.items[] | @base64'); do
 	fi
 
 	# archive the issue from the old project
+	#echo "Archive issue"
 	#gh project item-archive $PROJECT \
-	#	--format json \
 	#	--id $(_jq '.id') \
 	#	--owner giantswarm
 done
