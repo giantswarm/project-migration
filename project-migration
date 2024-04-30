@@ -3,6 +3,7 @@
 set -eu
 
 PROJECT=""
+DRY_RUN=false
 TYPE=""
 NAME=""
 AREA=""
@@ -12,6 +13,7 @@ help() {
 	echo "Help:"
 	echo "  -h  Help"
 	echo "  -p  Project Number (eg 301)"
+	echo "  -d  Dry run"
 	echo "  -t  Type (eg 'team, sig, wg')"
 	echo "  -n  Name of Team, SIG or WG (eg Rocket)"
 	echo "  -a  Area (eg KaaS)"
@@ -19,9 +21,17 @@ help() {
 	exit
 }
 
-while getopts "hp:t:n:a:f:" flag; do
+abort() {
+	echo "$1"
+	if [ "$DRY_RUN" = false ]; then
+		exit 1
+	fi
+}
+
+while getopts "hdp:t:n:a:f:" flag; do
 	case "${flag}" in
 	p) PROJECT=${OPTARG} ;;
+	d) DRY_RUN=true ;;
 	t) TYPE=${OPTARG} ;;
 	n) NAME=${OPTARG} ;;
 	a) AREA=${OPTARG} ;;
@@ -36,24 +46,20 @@ done
 
 # check if all parameters are set
 if [ "$PROJECT" = "" ]; then
-	echo "Project number is missing. Exiting"
-	exit 1
+	abort "Project number is missing. Exiting"
 fi
 
 if [ "$TYPE" = "" ]; then
-	echo "Type is missing. Exiting"
-	exit 1
+	abort "Type is missing. Exiting"
 fi
 
 if [ "$NAME" = "" ]; then
-	echo "Name is missing. Exiting"
-	exit 1
+	abort "Name is missing. Exiting"
 fi
 
 # check if type is either Team, SIG or WG
 if [ "$TYPE" != "team" ] && [ "$TYPE" != "sig" ] && [ "$TYPE" != "wg" ]; then
-	echo "Type must be either team, sig or wg. Exiting"
-	exit 1
+	abort "Type must be either team, sig or wg. Exiting"
 fi
 
 ROADMAP=273
@@ -74,8 +80,7 @@ _project() {
 
 # check if project exists
 if [ "$projects" = "" ]; then
-	echo "Project '${PROJECT}' not found. Exiting"
-	exit 1
+	abort "Project '${PROJECT}' not found. Exiting"
 fi
 
 PROJECT_ID="$(_project ".id")"
@@ -205,8 +210,7 @@ if [ "$FUNCTION" != "" ]; then
 fi
 
 if $FIELD_ABORT; then
-	echo "There are fields in the project board that are not in the roadmap board. Please add or change the fields."
-	exit
+	abort "There are fields in the project board that are not in the roadmap board. Please add or change the fields."
 fi
 
 # get all issues from the team board
@@ -223,131 +227,139 @@ for item in $(echo "${items}" | jq -r '.items[] | @base64'); do
 		continue
 	fi
 
+	if [ "$DRY_RUN" = true ]; then
+		issue_on_roadmap=$(gh issue view --json "projectItems" $(_jq '.content.url') | jq -r ".projectItems[] | select(.title == \"Roadmap\")")
+		if [ "$issue_on_roadmap" == "" ]; then
+			echo "Issue $(_jq '.content.title') is not on the roadmap"
+		fi
+	fi
+
 	# add issue to the roadmap board
-	echo "Add issue $(_jq '.title') to the roadmap board"
-	ITEM_ID=$(gh project item-add $ROADMAP \
-		--owner giantswarm \
-		--format json \
-		--url $(_jq '.content.url') | jq -r '.id')
+	if [ "$DRY_RUN" = false ]; then
+		echo "Add issue $(_jq '.title') to the roadmap board"
+		gh project item-add $ROADMAP \
+			--owner giantswarm \
+			--format json \
+			--url $(_jq '.content.url') | jq -r '.id'
 
-	# add team field or sig or wg
-	if [ "$TYPE" = "team" ]; then
-		echo "Edit team field"
-		gh project item-edit \
-			--project-id $ROADMAP_PROJECT_ID \
-			--id $ITEM_ID \
-			--field-id $roadmap_team_id \
-			--single-select-option-id $roadmap_team_value_id
-	fi
-
-	if [ "$TYPE" = "sig" ]; then
-		echo "Edit sig field"
-		gh project item-edit \
-			--project-id $ROADMAP_PROJECT_ID \
-			--id $ITEM_ID \
-			--field-id $roadmap_sig_id \
-			--single-select-option-id $roadmap_sig_value_id
-	fi
-
-	if [ "$TYPE" = "wg" ]; then
-		echo "Eidt wg field"
-		gh project item-edit \
-			--project-id $ROADMAP_PROJECT_ID \
-			--id $ITEM_ID \
-			--field-id $roadmap_wg_id \
-			--single-select-option-id $roadmap_wg_value_id
-	fi
-
-	# add area field
-	if [ "$AREA" != "" ]; then
-		echo "Edit area field"
-		gh project item-edit \
-			--project-id $ROADMAP_PROJECT_ID \
-			--id $ITEM_ID \
-			--field-id $roadmap_area_id \
-			--single-select-option-id $roadmap_area_value_id
-	fi
-
-	# add function field
-	if [ "$FUNCTION" != "" ]; then
-		echo "Edit function field"
-		gh project item-edit \
-			--project-id $ROADMAP_PROJECT_ID \
-			--id $ITEM_ID \
-			--field-id $roadmap_function_id \
-			--single-select-option-id $roadmap_function_value_id
-	fi
-
-	# add status
-	status=$(_jq '.status')
-	if [ "$status" != "null" ]; then
-		roadmap_status_value_id=$(echo $roadmap_status | jq -r ".options[] | select(.name == \"${status}\") | .id")
-		if [ "$roadmap_status_value_id" = "" ]; then
-			echo "Status '$(_jq '.status')' not found in roadmap."
-			continue
+		# add team field or sig or wg
+		if [ "$TYPE" = "team" ]; then
+			echo "Edit team field"
+			gh project item-edit \
+				--project-id $ROADMAP_PROJECT_ID \
+				--id $ITEM_ID \
+				--field-id $roadmap_team_id \
+				--single-select-option-id $roadmap_team_value_id
 		fi
-		echo "Edit status field"
-		gh project item-edit \
-			--project-id $ROADMAP_PROJECT_ID \
-			--id $ITEM_ID \
-			--field-id $roadmap_status_id \
-			--single-select-option-id $roadmap_status_value_id
-	fi
 
-	# add kind
-	kind=$(_jq '.kind')
-	if [ "$kind" != "null" ]; then
-		roadmap_kind_value_id=$(echo $roadmap_kind | jq -r ".options[] | select(.name == \"${kind}\") | .id")
-		if [ "$roadmap_kind_value_id" = "" ]; then
-			echo "Kind '$(_jq '.kind')' not found in roadmap."
-			continue
+		if [ "$TYPE" = "sig" ]; then
+			echo "Edit sig field"
+			gh project item-edit \
+				--project-id $ROADMAP_PROJECT_ID \
+				--id $ITEM_ID \
+				--field-id $roadmap_sig_id \
+				--single-select-option-id $roadmap_sig_value_id
 		fi
-		echo "Edit kind field"
-		gh project item-edit \
-			--project-id $ROADMAP_PROJECT_ID \
-			--id $ITEM_ID \
-			--field-id $roadmap_kind_id \
-			--single-select-option-id $roadmap_kind_value_id
-	fi
 
-	# add workstream
-	workstream=$(_jq '.workstream')
-	if [ "$workstream" != "null" ]; then
-		roadmap_workstream_value_id=$(echo $roadmap_workstream | jq -r ".options[] | select(.name == \"${workstream}\") | .id")
-		if [ "$roadmap_workstream_value_id" = "" ]; then
-			echo "Workstream '$(_jq '.workstream')' not found in roadmap."
-			continue
+		if [ "$TYPE" = "wg" ]; then
+			echo "Eidt wg field"
+			gh project item-edit \
+				--project-id $ROADMAP_PROJECT_ID \
+				--id $ITEM_ID \
+				--field-id $roadmap_wg_id \
+				--single-select-option-id $roadmap_wg_value_id
 		fi
-		echo "Edit workstream field"
-		gh project item-edit \
-			--project-id $ROADMAP_PROJECT_ID \
-			--id $ITEM_ID \
-			--field-id $roadmap_workstream_id \
-			--single-select-option-id $roadmap_workstream_value_id
-	fi
 
-	# add start date
-	startdate=$(_jq '."start Date"')
-	if [ "$startdate" != "null" ]; then
-		echo "Edit start date field"
-		gh project item-edit \
-			--project-id $ROADMAP_PROJECT_ID \
-			--id $ITEM_ID \
-			--field-id $roadmap_startdate_id \
-			--date ${startdate}
-	fi
+		# add area field
+		if [ "$AREA" != "" ]; then
+			echo "Edit area field"
+			gh project item-edit \
+				--project-id $ROADMAP_PROJECT_ID \
+				--id $ITEM_ID \
+				--field-id $roadmap_area_id \
+				--single-select-option-id $roadmap_area_value_id
+		fi
 
-	# add target date
-	targetdate=$(_jq '."target Date"')
-	if [ "$targetdate" != "null" ]; then
-		echo "Edit target date field"
-		gh project item-edit \
-			--project-id $ROADMAP_PROJECT_ID \
-			--id $ITEM_ID \
-			--field-id $roadmap_targetdate_id \
-			--date ${targetdate}
-	fi
+		# add function field
+		if [ "$FUNCTION" != "" ]; then
+			echo "Edit function field"
+			gh project item-edit \
+				--project-id $ROADMAP_PROJECT_ID \
+				--id $ITEM_ID \
+				--field-id $roadmap_function_id \
+				--single-select-option-id $roadmap_function_value_id
+		fi
 
+		# add status
+		status=$(_jq '.status')
+		if [ "$status" != "null" ]; then
+			roadmap_status_value_id=$(echo $roadmap_status | jq -r ".options[] | select(.name == \"${status}\") | .id")
+			if [ "$roadmap_status_value_id" = "" ]; then
+				echo "Status '$(_jq '.status')' not found in roadmap."
+				continue
+			fi
+			echo "Edit status field"
+			gh project item-edit \
+				--project-id $ROADMAP_PROJECT_ID \
+				--id $ITEM_ID \
+				--field-id $roadmap_status_id \
+				--single-select-option-id $roadmap_status_value_id
+		fi
+
+		# add kind
+		kind=$(_jq '.kind')
+		if [ "$kind" != "null" ]; then
+			roadmap_kind_value_id=$(echo $roadmap_kind | jq -r ".options[] | select(.name == \"${kind}\") | .id")
+			if [ "$roadmap_kind_value_id" = "" ]; then
+				echo "Kind '$(_jq '.kind')' not found in roadmap."
+				continue
+			fi
+			echo "Edit kind field"
+			gh project item-edit \
+				--project-id $ROADMAP_PROJECT_ID \
+				--id $ITEM_ID \
+				--field-id $roadmap_kind_id \
+				--single-select-option-id $roadmap_kind_value_id
+		fi
+
+		# add workstream
+		workstream=$(_jq '.workstream')
+		if [ "$workstream" != "null" ]; then
+			roadmap_workstream_value_id=$(echo $roadmap_workstream | jq -r ".options[] | select(.name == \"${workstream}\") | .id")
+			if [ "$roadmap_workstream_value_id" = "" ]; then
+				echo "Workstream '$(_jq '.workstream')' not found in roadmap."
+				continue
+			fi
+			echo "Edit workstream field"
+			gh project item-edit \
+				--project-id $ROADMAP_PROJECT_ID \
+				--id $ITEM_ID \
+				--field-id $roadmap_workstream_id \
+				--single-select-option-id $roadmap_workstream_value_id
+		fi
+
+		# add start date
+		startdate=$(_jq '."start Date"')
+		if [ "$startdate" != "null" ]; then
+			echo "Edit start date field"
+			gh project item-edit \
+				--project-id $ROADMAP_PROJECT_ID \
+				--id $ITEM_ID \
+				--field-id $roadmap_startdate_id \
+				--date ${startdate}
+		fi
+
+		# add target date
+		targetdate=$(_jq '."target Date"')
+		if [ "$targetdate" != "null" ]; then
+			echo "Edit target date field"
+			gh project item-edit \
+				--project-id $ROADMAP_PROJECT_ID \
+				--id $ITEM_ID \
+				--field-id $roadmap_targetdate_id \
+				--date ${targetdate}
+		fi
+	fi
 	# archive the issue from the old project
 	#echo "Archive issue"
 	#gh project item-archive $PROJECT \
