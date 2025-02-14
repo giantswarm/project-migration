@@ -63,37 +63,49 @@ func usage() {
 	os.Exit(0)
 }
 
-func runCmd(cmdStr string, args ...string) string {
-	cmd := exec.Command(cmdStr, args...)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		log.Fatalf("Error executing %s: %v", cmdStr, err)
+var runCmd func(cmdStr string, args ...string) string
+
+func init() {
+	runCmd = func(cmdStr string, args ...string) string {
+		cmd := exec.Command(cmdStr, args...)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		if err := cmd.Run(); err != nil {
+			log.Fatalf("Error executing %s: %v", cmdStr, err)
+		}
+		return out.String()
 	}
-	return out.String()
 }
 
+// Replace main() with a new version that calls runMigration().
 func main() {
 	flag.Usage = usage
 	flag.Parse()
+	if err := runMigration(); err != nil {
+		log.Fatalf("Migration failed: %v", err)
+	}
+}
 
+// runMigration contains the migration logic and returns an error on failure.
+func runMigration() error {
+	// Validate required flags.
 	if *project == "" {
-		log.Fatalf("Project number is missing. Exiting")
+		return fmt.Errorf("project number is missing. Exiting")
 	}
 	if *typ == "" {
-		log.Fatalf("Type is missing. Exiting")
+		return fmt.Errorf("type is missing. Exiting")
 	}
 	if *name == "" {
-		log.Fatalf("Name is missing. Exiting")
+		return fmt.Errorf("name is missing. Exiting")
 	}
 	if *typ != "team" && *typ != "sig" && *typ != "wg" {
-		log.Fatalf("Type must be either team, sig or wg. Exiting")
+		return fmt.Errorf("type must be either team, sig or wg. Exiting")
 	}
 
 	projectsJSON := runCmd("gh", "project", "list", appendFlags)
 	var projects []Project
 	if err := json.Unmarshal([]byte(projectsJSON), &projects); err != nil {
-		log.Fatalf("Error parsing projects: %v", err)
+		return fmt.Errorf("error parsing projects: %v", err)
 	}
 
 	found := false
@@ -104,7 +116,7 @@ func main() {
 		}
 	}
 	if !found {
-		log.Fatalf("Project '%s' not found. Exiting", *project)
+		return fmt.Errorf("project '%s' not found. Exiting", *project)
 	}
 
 	projectFieldsJSON := runCmd("gh", "project", "field-list", *project, appendFlags)
@@ -112,7 +124,7 @@ func main() {
 		Fields []Field `json:"fields"`
 	}
 	if err := json.Unmarshal([]byte(projectFieldsJSON), &projectFields); err != nil {
-		log.Fatalf("Error parsing project fields: %v", err)
+		return fmt.Errorf("error parsing project fields: %v", err)
 	}
 
 	roadmapFieldsJSON := runCmd("gh", "project", "field-list", roadmap, appendFlags)
@@ -120,7 +132,7 @@ func main() {
 		Fields []Field `json:"fields"`
 	}
 	if err := json.Unmarshal([]byte(roadmapFieldsJSON), &roadmapFields); err != nil {
-		log.Fatalf("Error parsing roadmap fields: %v", err)
+		return fmt.Errorf("error parsing roadmap fields: %v", err)
 	}
 
 	findField := func(fields []Field, name string) *Field {
@@ -140,7 +152,7 @@ func main() {
 	roadWorkstream := findField(roadmapFields.Fields, "Workstream")
 
 	if projStatus == nil || roadStatus == nil || projKind == nil || roadKind == nil || projWorkstream == nil || roadWorkstream == nil {
-		log.Fatalf("Required fields missing in project or roadmap")
+		return fmt.Errorf("required fields missing in project or roadmap")
 	}
 
 	roadTeam := findField(roadmapFields.Fields, "Team")
@@ -178,7 +190,7 @@ func main() {
 			}
 		}
 		if typeOptionID == "" {
-			log.Fatalf("Team '%s' not found in roadmap", *name)
+			return fmt.Errorf("team '%s' not found in roadmap", *name)
 		}
 	} else if *typ == "sig" && roadSIG != nil {
 		for _, o := range roadSIG.Options {
@@ -188,7 +200,7 @@ func main() {
 			}
 		}
 		if typeOptionID == "" {
-			log.Fatalf("SIG '%s' not found in roadmap", *name)
+			return fmt.Errorf("SIG '%s' not found in roadmap", *name)
 		}
 	} else if *typ == "wg" && roadWG != nil {
 		for _, o := range roadWG.Options {
@@ -198,7 +210,7 @@ func main() {
 			}
 		}
 		if typeOptionID == "" {
-			log.Fatalf("WG '%s' not found in roadmap", *name)
+			return fmt.Errorf("WG '%s' not found in roadmap", *name)
 		}
 	}
 
@@ -211,7 +223,7 @@ func main() {
 			}
 		}
 		if areaOptionID == "" {
-			log.Fatalf("Area '%s' not found in roadmap", *area)
+			return fmt.Errorf("area '%s' not found in roadmap", *area)
 		}
 	}
 
@@ -223,7 +235,7 @@ func main() {
 			}
 		}
 		if functionOptionID == "" {
-			log.Fatalf("Function '%s' not found in roadmap", *functionF)
+			return fmt.Errorf("function '%s' not found in roadmap", *functionF)
 		}
 	}
 
@@ -232,7 +244,7 @@ func main() {
 		Items []Item `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(itemsJSON), &items); err != nil {
-		log.Fatalf("Error parsing items: %v", err)
+		return fmt.Errorf("error parsing items: %v", err)
 	}
 
 	for _, item := range items.Items {
@@ -333,4 +345,5 @@ func main() {
 			runCmd("gh", "project", "item-archive", *project, "--id", item.ID, "--owner", "giantswarm")
 		}
 	}
+	return nil
 }
