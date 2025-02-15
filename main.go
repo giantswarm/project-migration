@@ -1,18 +1,17 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"log/slog"
 
 	"giantswarm.io/project-migration/cli"
+	"giantswarm.io/project-migration/github"
 	"giantswarm.io/project-migration/types" // new import for types
 )
 
@@ -77,46 +76,22 @@ const (
 // Global verbose flag.
 var verbose bool
 
-var appendFlags = []string{"--owner", "giantswarm", "-L", "10000", "--format", "json"}
-
-var runCmd func(cmdStr string, args ...string) string
-
-func init() {
-	// Updated runCmd with slog-based logging.
-	runCmd = func(cmdStr string, args ...string) string {
-		cmdLine := fmt.Sprintf("%s %s", cmdStr, strings.Join(args, " "))
-		if verbose {
-			slog.Info("Executing command", "cmd", cmdLine)
-		}
-		cmd := exec.Command(cmdStr, args...)
-		var out bytes.Buffer
-		var errOut bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &errOut
-		if err := cmd.Run(); err != nil {
-			slog.Error("Error executing command", "cmd", cmdStr, "stderr", errOut.String())
-			os.Exit(1)
-		}
-		if verbose {
-			slog.Info("Command output", "output", out.String())
-		}
-		return out.String()
-	}
-}
-
 func main() {
 	// Set our custom handler with a friendly CLI log output.
 	slog.SetDefault(slog.New(newCliHandler()))
 	cfg := cli.Parse()
 	verbose = cfg.Verbose
-	if err := runMigration(cfg); err != nil {
+
+	// Create a GitHub client from the new package.
+	ghClient := github.NewClient(verbose)
+	if err := runMigration(cfg, ghClient); err != nil {
 		slog.Error("Migration failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-// runMigration now accepts a configuration parameter.
-func runMigration(cfg *cli.Config) error {
+// runMigration now accepts a github client.
+func runMigration(cfg *cli.Config, gh github.Client) error {
 	// Validate required flags.
 	if cfg.Project == "" {
 		return fmt.Errorf("project number is missing. Exiting")
@@ -132,7 +107,10 @@ func runMigration(cfg *cli.Config) error {
 	}
 
 	// Updated projects JSON parsing logic.
-	projectsJSON := runCmd("gh", append([]string{"project", "list"}, appendFlags...)...)
+	projectsJSON, err := gh.ListProjects()
+	if err != nil {
+		return err
+	}
 	var projects []types.Project // updated to use types.Project
 	// Try to unmarshal directly as a slice.
 	if err := json.Unmarshal([]byte(projectsJSON), &projects); err != nil {
@@ -169,7 +147,10 @@ func runMigration(cfg *cli.Config) error {
 		return fmt.Errorf("project '%s' not found. Exiting", cfg.Project)
 	}
 
-	projectFieldsJSON := runCmd("gh", append([]string{"project", "field-list", cfg.Project}, appendFlags...)...)
+	projectFieldsJSON, err := gh.FieldList(cfg.Project)
+	if err != nil {
+		return err
+	}
 	var projectFields struct {
 		Fields []types.Field `json:"fields"` // updated to use types.Field
 	}
@@ -177,7 +158,10 @@ func runMigration(cfg *cli.Config) error {
 		return fmt.Errorf("error parsing project fields: %v", err)
 	}
 
-	roadmapFieldsJSON := runCmd("gh", append([]string{"project", "field-list", roadmap}, appendFlags...)...)
+	roadmapFieldsJSON, err := gh.FieldList(roadmap)
+	if err != nil {
+		return err
+	}
 	var roadmapFields struct {
 		Fields []types.Field `json:"fields"` // updated to use types.Field
 	}
@@ -310,7 +294,10 @@ func runMigration(cfg *cli.Config) error {
 		}
 	}
 
-	itemsJSON := runCmd("gh", append([]string{"project", "item-list", cfg.Project}, appendFlags...)...)
+	itemsJSON, err := gh.ListItems(cfg.Project)
+	if err != nil {
+		return err
+	}
 	var items struct {
 		Items []types.Item `json:"items"` // updated to use types.Item
 	}
@@ -325,34 +312,42 @@ func runMigration(cfg *cli.Config) error {
 		}
 
 		slog.Info("Adding issue to roadmap", "title", item.Title)
-		addOut := runCmd("gh", "project", "item-add", roadmap, "--owner", "giantswarm", "--format", "json", "--url", item.Content.URL)
+		addOut, err := gh.AddItem(roadmap, item.Content.URL)
+		if err != nil {
+			slog.Error("Error adding item", "title", item.Title, "error", err)
+			continue
+		}
 		var newItem struct {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal([]byte(addOut), &newItem); err != nil {
-			slog.Error("Error adding item", "title", item.Title, "error", err)
+			slog.Error("Error parsing new item", "title", item.Title, "error", err)
 			continue
 		}
 
 		switch cfg.Type {
 		case "team":
-			runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
-				"--field-id", roadTeam.ID, "--single-select-option-id", typeOptionID)
+			_, err = gh.EditItem(roadmapPID, newItem.ID, roadTeam.ID, typeOptionID)
 		case "sig":
-			runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
-				"--field-id", roadSIG.ID, "--single-select-option-id", typeOptionID)
+			_, err = gh.EditItem(roadmapPID, newItem.ID, roadSIG.ID, typeOptionID)
 		case "wg":
-			runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
-				"--field-id", roadWG.ID, "--single-select-option-id", typeOptionID)
+			_, err = gh.EditItem(roadmapPID, newItem.ID, roadWG.ID, typeOptionID)
+		}
+		if err != nil {
+			slog.Error("Error editing item", "item", newItem.ID, "error", err)
 		}
 
 		if areaOptionID != "" {
-			runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
-				"--field-id", roadArea.ID, "--single-select-option-id", areaOptionID)
+			_, err = gh.EditItem(roadmapPID, newItem.ID, roadArea.ID, areaOptionID)
+			if err != nil {
+				slog.Error("Error editing area", "item", newItem.ID, "error", err)
+			}
 		}
 		if functionOptionID != "" {
-			runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
-				"--field-id", roadFunction.ID, "--single-select-option-id", functionOptionID)
+			_, err = gh.EditItem(roadmapPID, newItem.ID, roadFunction.ID, functionOptionID)
+			if err != nil {
+				slog.Error("Error editing function", "item", newItem.ID, "error", err)
+			}
 		}
 
 		if s, ok := item.Status.(string); ok && s != "" {
@@ -364,8 +359,10 @@ func runMigration(cfg *cli.Config) error {
 				}
 			}
 			if statusOptID != "" {
-				runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
-					"--field-id", roadStatus.ID, "--single-select-option-id", statusOptID)
+				_, err = gh.EditItem(roadmapPID, newItem.ID, roadStatus.ID, statusOptID)
+				if err != nil {
+					slog.Error("Error editing status", "item", newItem.ID, "error", err)
+				}
 			} else {
 				slog.Info("Status not found in roadmap", "status", s)
 			}
@@ -380,8 +377,10 @@ func runMigration(cfg *cli.Config) error {
 				}
 			}
 			if kindOptID != "" {
-				runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
-					"--field-id", roadKind.ID, "--single-select-option-id", kindOptID)
+				_, err = gh.EditItem(roadmapPID, newItem.ID, roadKind.ID, kindOptID)
+				if err != nil {
+					slog.Error("Error editing kind", "item", newItem.ID, "error", err)
+				}
 			} else {
 				slog.Info("Kind not found in roadmap", "kind", k)
 			}
@@ -396,24 +395,33 @@ func runMigration(cfg *cli.Config) error {
 				}
 			}
 			if wsOptID != "" {
-				runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
-					"--field-id", roadWorkstream.ID, "--single-select-option-id", wsOptID)
+				_, err = gh.EditItem(roadmapPID, newItem.ID, roadWorkstream.ID, wsOptID)
+				if err != nil {
+					slog.Error("Error editing workstream", "item", newItem.ID, "error", err)
+				}
 			} else {
 				slog.Info("Workstream not found in roadmap", "workstream", ws)
 			}
 		}
 
 		if item.StartDate != "" && item.StartDate != "null" && roadStartDate != nil {
-			runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
-				"--field-id", roadStartDate.ID, "--date", item.StartDate)
+			_, err = gh.EditItemDate(roadmapPID, newItem.ID, roadStartDate.ID, item.StartDate)
+			if err != nil {
+				slog.Error("Error editing start date", "item", newItem.ID, "error", err)
+			}
 		}
 		if item.TargetDate != "" && item.TargetDate != "null" && roadTargetDate != nil {
-			runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
-				"--field-id", roadTargetDate.ID, "--date", item.TargetDate)
+			_, err = gh.EditItemDate(roadmapPID, newItem.ID, roadTargetDate.ID, item.TargetDate)
+			if err != nil {
+				slog.Error("Error editing target date", "item", newItem.ID, "error", err)
+			}
 		}
 
 		if !cfg.DryRun {
-			runCmd("gh", "project", "item-archive", cfg.Project, "--id", item.ID, "--owner", "giantswarm")
+			_, err = gh.ArchiveItem(cfg.Project, item.ID)
+			if err != nil {
+				slog.Error("Error archiving item", "item", item.ID, "error", err)
+			}
 		}
 	}
 	return nil
