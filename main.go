@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,60 +11,9 @@ import (
 
 	"giantswarm.io/project-migration/cli"
 	"giantswarm.io/project-migration/github"
-	"giantswarm.io/project-migration/types" // new import for types
+	"giantswarm.io/project-migration/log"   // new import for log package
+	"giantswarm.io/project-migration/types" // ...existing import...
 )
-
-// --- updated custom handler for friendly colored output ---
-type cliHandler struct{}
-
-func (h *cliHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return true
-}
-
-func (h *cliHandler) Handle(ctx context.Context, r slog.Record) error {
-	var color string
-	if r.Level >= slog.LevelError {
-		color = "\033[31m" // red for errors
-	} else {
-		color = "\033[36m" // cyan for info
-	}
-	var b strings.Builder
-	b.WriteString(color)
-	b.WriteString(r.Message)
-	// Append key-value attributes if present.
-	if r.NumAttrs() > 0 {
-		b.WriteString(" (")
-		first := true
-		r.Attrs(func(a slog.Attr) bool {
-			if !first {
-				b.WriteString(", ")
-			}
-			first = false
-			b.WriteString(a.Key)
-			b.WriteString("=")
-			b.WriteString(fmt.Sprint(a.Value.Any()))
-			return true
-		})
-		b.WriteString(")")
-	}
-	b.WriteString("\033[0m\n")
-	fmt.Print(b.String())
-	return nil
-}
-
-func (h *cliHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return h
-}
-
-func (h *cliHandler) WithGroup(name string) slog.Handler {
-	return h
-}
-
-func newCliHandler() slog.Handler {
-	return &cliHandler{}
-}
-
-// --- end of custom handler ---
 
 // Add missing constants.
 const (
@@ -77,8 +25,8 @@ const (
 var verbose bool
 
 func main() {
-	// Set our custom handler with a friendly CLI log output.
-	slog.SetDefault(slog.New(newCliHandler()))
+	// Set our custom handler from the new log package.
+	slog.SetDefault(slog.New(log.NewHandler()))
 	cfg := cli.Parse()
 	verbose = cfg.Verbose
 
