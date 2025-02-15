@@ -2,140 +2,190 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+
+	"log/slog"
+
+	"giantswarm.io/project-migration/cli"
+	"giantswarm.io/project-migration/types" // new import for types
 )
 
-type Project struct {
-	ID     string `json:"id"`
-	Number int    `json:"number"`
+// --- updated custom handler for friendly colored output ---
+type cliHandler struct{}
+
+func (h *cliHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return true
 }
 
-type Field struct {
-	ID      string        `json:"id"`
-	Name    string        `json:"name"`
-	Options []FieldOption `json:"options"`
+func (h *cliHandler) Handle(ctx context.Context, r slog.Record) error {
+	var color string
+	if r.Level >= slog.LevelError {
+		color = "\033[31m" // red for errors
+	} else {
+		color = "\033[36m" // cyan for info
+	}
+	var b strings.Builder
+	b.WriteString(color)
+	b.WriteString(r.Message)
+	// Append key-value attributes if present.
+	if r.NumAttrs() > 0 {
+		b.WriteString(" (")
+		first := true
+		r.Attrs(func(a slog.Attr) bool {
+			if !first {
+				b.WriteString(", ")
+			}
+			first = false
+			b.WriteString(a.Key)
+			b.WriteString("=")
+			b.WriteString(fmt.Sprint(a.Value.Any()))
+			return true
+		})
+		b.WriteString(")")
+	}
+	b.WriteString("\033[0m\n")
+	fmt.Print(b.String())
+	return nil
 }
 
-type FieldOption struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+func (h *cliHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return h
 }
 
-type Item struct {
-	ID         string      `json:"id"`
-	Title      string      `json:"title"`
-	Status     interface{} `json:"status"`
-	Kind       interface{} `json:"kind"`
-	Workstream interface{} `json:"workstream"`
-	StartDate  string      `json:"start Date"`
-	TargetDate string      `json:"target Date"`
-	Content    struct {
-		Type  string `json:"type"`
-		Title string `json:"title"`
-		URL   string `json:"url"`
-	} `json:"content"`
+func (h *cliHandler) WithGroup(name string) slog.Handler {
+	return h
 }
 
-var (
-	project   = flag.String("p", "", "Project Number (eg 301)")
-	dryRun    = flag.Bool("d", false, "Dry run")
-	typ       = flag.String("t", "", "Type (eg 'team, sig, wg')")
-	name      = flag.String("n", "", "Name of Team, SIG or WG (eg Rocket)")
-	area      = flag.String("a", "", "Area (eg KaaS)")
-	functionF = flag.String("f", "", "Function (eg 'Product Strategy')")
-)
+func newCliHandler() slog.Handler {
+	return &cliHandler{}
+}
 
+// --- end of custom handler ---
+
+// Add missing constants.
 const (
-	roadmap     = "273"
-	roadmapPID  = "PVT_kwDOAHNM9M4ABvWx"
-	appendFlags = "--owner giantswarm -L 10000 --format json"
+	roadmap    = "273"
+	roadmapPID = "PVT_kwDOAHNM9M4ABvWx"
 )
 
-func usage() {
-	fmt.Println("Usage:")
-	flag.PrintDefaults()
-	os.Exit(0)
-}
+// Global verbose flag.
+var verbose bool
+
+var appendFlags = []string{"--owner", "giantswarm", "-L", "10000", "--format", "json"}
 
 var runCmd func(cmdStr string, args ...string) string
 
 func init() {
+	// Updated runCmd with slog-based logging.
 	runCmd = func(cmdStr string, args ...string) string {
+		cmdLine := fmt.Sprintf("%s %s", cmdStr, strings.Join(args, " "))
+		if verbose {
+			slog.Info("Executing command", "cmd", cmdLine)
+		}
 		cmd := exec.Command(cmdStr, args...)
 		var out bytes.Buffer
+		var errOut bytes.Buffer
 		cmd.Stdout = &out
+		cmd.Stderr = &errOut
 		if err := cmd.Run(); err != nil {
-			log.Fatalf("Error executing %s: %v", cmdStr, err)
+			slog.Error("Error executing command", "cmd", cmdStr, "stderr", errOut.String())
+			os.Exit(1)
+		}
+		if verbose {
+			slog.Info("Command output", "output", out.String())
 		}
 		return out.String()
 	}
 }
 
-// Replace main() with a new version that calls runMigration().
 func main() {
-	flag.Usage = usage
-	flag.Parse()
-	if err := runMigration(); err != nil {
-		log.Fatalf("Migration failed: %v", err)
+	// Set our custom handler with a friendly CLI log output.
+	slog.SetDefault(slog.New(newCliHandler()))
+	cfg := cli.Parse()
+	verbose = cfg.Verbose
+	if err := runMigration(cfg); err != nil {
+		slog.Error("Migration failed", "error", err)
+		os.Exit(1)
 	}
 }
 
-// runMigration contains the migration logic and returns an error on failure.
-func runMigration() error {
+// runMigration now accepts a configuration parameter.
+func runMigration(cfg *cli.Config) error {
 	// Validate required flags.
-	if *project == "" {
+	if cfg.Project == "" {
 		return fmt.Errorf("project number is missing. Exiting")
 	}
-	if *typ == "" {
+	if cfg.Type == "" {
 		return fmt.Errorf("type is missing. Exiting")
 	}
-	if *name == "" {
+	if cfg.Name == "" {
 		return fmt.Errorf("name is missing. Exiting")
 	}
-	if *typ != "team" && *typ != "sig" && *typ != "wg" {
+	if cfg.Type != "team" && cfg.Type != "sig" && cfg.Type != "wg" {
 		return fmt.Errorf("type must be either team, sig or wg. Exiting")
 	}
 
-	projectsJSON := runCmd("gh", "project", "list", appendFlags)
-	var projects []Project
+	// Updated projects JSON parsing logic.
+	projectsJSON := runCmd("gh", append([]string{"project", "list"}, appendFlags...)...)
+	var projects []types.Project // updated to use types.Project
+	// Try to unmarshal directly as a slice.
 	if err := json.Unmarshal([]byte(projectsJSON), &projects); err != nil {
-		return fmt.Errorf("error parsing projects: %v", err)
+		// Try to unmarshal into a wrapper with a "projects" field.
+		var projResp struct {
+			Projects []types.Project `json:"projects"`
+		}
+		if err2 := json.Unmarshal([]byte(projectsJSON), &projResp); err2 == nil {
+			projects = projResp.Projects
+		} else {
+			return fmt.Errorf("error parsing projects: %v; error2: %v", err, err2)
+		}
+	}
+	// Only log if verbose is enabled.
+	if verbose {
+		slog.Info("Retrieved projects", "projects", projects)
+	}
+	requested, err := strconv.Atoi(cfg.Project)
+	if err != nil {
+		return fmt.Errorf("invalid project number: %s", cfg.Project)
+	}
+	if verbose {
+		slog.Info("Requested project number", "projectNumber", requested)
 	}
 
 	found := false
 	for _, p := range projects {
-		if fmt.Sprintf("%d", p.Number) == *project {
+		if p.Number == requested {
 			found = true
 			break
 		}
 	}
 	if !found {
-		return fmt.Errorf("project '%s' not found. Exiting", *project)
+		return fmt.Errorf("project '%s' not found. Exiting", cfg.Project)
 	}
 
-	projectFieldsJSON := runCmd("gh", "project", "field-list", *project, appendFlags)
+	projectFieldsJSON := runCmd("gh", append([]string{"project", "field-list", cfg.Project}, appendFlags...)...)
 	var projectFields struct {
-		Fields []Field `json:"fields"`
+		Fields []types.Field `json:"fields"` // updated to use types.Field
 	}
 	if err := json.Unmarshal([]byte(projectFieldsJSON), &projectFields); err != nil {
 		return fmt.Errorf("error parsing project fields: %v", err)
 	}
 
-	roadmapFieldsJSON := runCmd("gh", "project", "field-list", roadmap, appendFlags)
+	roadmapFieldsJSON := runCmd("gh", append([]string{"project", "field-list", roadmap}, appendFlags...)...)
 	var roadmapFields struct {
-		Fields []Field `json:"fields"`
+		Fields []types.Field `json:"fields"` // updated to use types.Field
 	}
 	if err := json.Unmarshal([]byte(roadmapFieldsJSON), &roadmapFields); err != nil {
 		return fmt.Errorf("error parsing roadmap fields: %v", err)
 	}
 
-	findField := func(fields []Field, name string) *Field {
+	findField := func(fields []types.Field, name string) *types.Field {
 		for i, f := range fields {
 			if f.Name == name {
 				return &fields[i]
@@ -151,7 +201,28 @@ func runMigration() error {
 	projWorkstream := findField(projectFields.Fields, "Workstream")
 	roadWorkstream := findField(roadmapFields.Fields, "Workstream")
 
-	if projStatus == nil || roadStatus == nil || projKind == nil || roadKind == nil || projWorkstream == nil || roadWorkstream == nil {
+	// Log missing required fields if any.
+	var missingFields []string
+	if projStatus == nil {
+		missingFields = append(missingFields, "Status in project")
+	}
+	if roadStatus == nil {
+		missingFields = append(missingFields, "Status in roadmap")
+	}
+	if projKind == nil {
+		missingFields = append(missingFields, "Kind in project")
+	}
+	if roadKind == nil {
+		missingFields = append(missingFields, "Kind in roadmap")
+	}
+	if projWorkstream == nil {
+		missingFields = append(missingFields, "Workstream in project")
+	}
+	if roadWorkstream == nil {
+		missingFields = append(missingFields, "Workstream in roadmap")
+	}
+	if len(missingFields) > 0 {
+		slog.Error("Required fields missing", "fields", missingFields)
 		return fmt.Errorf("required fields missing in project or roadmap")
 	}
 
@@ -163,7 +234,7 @@ func runMigration() error {
 	roadStartDate := findField(roadmapFields.Fields, "Start Date")
 	roadTargetDate := findField(roadmapFields.Fields, "Target Date")
 
-	validateOptions := func(projectField, roadmapField *Field) {
+	validateOptions := func(projectField, roadmapField *types.Field) {
 		for _, opt := range projectField.Options {
 			foundOpt := false
 			for _, ropt := range roadmapField.Options {
@@ -173,7 +244,7 @@ func runMigration() error {
 				}
 			}
 			if !foundOpt {
-				log.Printf("'%s' not found in roadmap %s", opt.Name, roadmapField.Name)
+				slog.Info("Option not found in roadmap", "option", opt.Name, "field", roadmapField.Name)
 			}
 		}
 	}
@@ -182,66 +253,66 @@ func runMigration() error {
 	validateOptions(projWorkstream, roadWorkstream)
 
 	var typeOptionID string
-	if *typ == "team" && roadTeam != nil {
+	if cfg.Type == "team" && roadTeam != nil {
 		for _, o := range roadTeam.Options {
-			if strings.HasPrefix(o.Name, *name) {
+			if strings.HasPrefix(o.Name, cfg.Name) {
 				typeOptionID = o.ID
 				break
 			}
 		}
 		if typeOptionID == "" {
-			return fmt.Errorf("team '%s' not found in roadmap", *name)
+			return fmt.Errorf("team '%s' not found in roadmap", cfg.Name)
 		}
-	} else if *typ == "sig" && roadSIG != nil {
+	} else if cfg.Type == "sig" && roadSIG != nil {
 		for _, o := range roadSIG.Options {
-			if strings.HasPrefix(o.Name, *name) {
+			if strings.HasPrefix(o.Name, cfg.Name) {
 				typeOptionID = o.ID
 				break
 			}
 		}
 		if typeOptionID == "" {
-			return fmt.Errorf("SIG '%s' not found in roadmap", *name)
+			return fmt.Errorf("SIG '%s' not found in roadmap", cfg.Name)
 		}
-	} else if *typ == "wg" && roadWG != nil {
+	} else if cfg.Type == "wg" && roadWG != nil {
 		for _, o := range roadWG.Options {
-			if strings.HasPrefix(o.Name, *name) {
+			if strings.HasPrefix(o.Name, cfg.Name) {
 				typeOptionID = o.ID
 				break
 			}
 		}
 		if typeOptionID == "" {
-			return fmt.Errorf("WG '%s' not found in roadmap", *name)
+			return fmt.Errorf("WG '%s' not found in roadmap", cfg.Name)
 		}
 	}
 
 	var areaOptionID, functionOptionID string
-	if *area != "" && roadArea != nil {
+	if cfg.Area != "" && roadArea != nil {
 		for _, o := range roadArea.Options {
-			if strings.HasPrefix(o.Name, *area) {
+			if strings.HasPrefix(o.Name, cfg.Area) {
 				areaOptionID = o.ID
 				break
 			}
 		}
 		if areaOptionID == "" {
-			return fmt.Errorf("area '%s' not found in roadmap", *area)
+			return fmt.Errorf("area '%s' not found in roadmap", cfg.Area)
 		}
 	}
 
-	if *functionF != "" && roadFunction != nil {
+	if cfg.Function != "" && roadFunction != nil {
 		for _, o := range roadFunction.Options {
-			if strings.HasPrefix(o.Name, *functionF) {
+			if strings.HasPrefix(o.Name, cfg.Function) {
 				functionOptionID = o.ID
 				break
 			}
 		}
 		if functionOptionID == "" {
-			return fmt.Errorf("function '%s' not found in roadmap", *functionF)
+			return fmt.Errorf("function '%s' not found in roadmap", cfg.Function)
 		}
 	}
 
-	itemsJSON := runCmd("gh", "project", "item-list", *project, appendFlags)
+	itemsJSON := runCmd("gh", append([]string{"project", "item-list", cfg.Project}, appendFlags...)...)
 	var items struct {
-		Items []Item `json:"items"`
+		Items []types.Item `json:"items"` // updated to use types.Item
 	}
 	if err := json.Unmarshal([]byte(itemsJSON), &items); err != nil {
 		return fmt.Errorf("error parsing items: %v", err)
@@ -249,21 +320,21 @@ func runMigration() error {
 
 	for _, item := range items.Items {
 		if item.Content.Type == "DraftIssue" {
-			log.Printf("Skipping draft: %s", item.Content.Title)
+			slog.Info("Skipping draft", "title", item.Content.Title)
 			continue
 		}
 
-		log.Printf("Adding issue '%s' to the roadmap board", item.Title)
+		slog.Info("Adding issue to roadmap", "title", item.Title)
 		addOut := runCmd("gh", "project", "item-add", roadmap, "--owner", "giantswarm", "--format", "json", "--url", item.Content.URL)
 		var newItem struct {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal([]byte(addOut), &newItem); err != nil {
-			log.Printf("Error adding item for %s: %v", item.Title, err)
+			slog.Error("Error adding item", "title", item.Title, "error", err)
 			continue
 		}
 
-		switch *typ {
+		switch cfg.Type {
 		case "team":
 			runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
 				"--field-id", roadTeam.ID, "--single-select-option-id", typeOptionID)
@@ -296,7 +367,7 @@ func runMigration() error {
 				runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
 					"--field-id", roadStatus.ID, "--single-select-option-id", statusOptID)
 			} else {
-				log.Printf("Status '%s' not found in roadmap.", s)
+				slog.Info("Status not found in roadmap", "status", s)
 			}
 		}
 
@@ -312,7 +383,7 @@ func runMigration() error {
 				runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
 					"--field-id", roadKind.ID, "--single-select-option-id", kindOptID)
 			} else {
-				log.Printf("Kind '%s' not found in roadmap.", k)
+				slog.Info("Kind not found in roadmap", "kind", k)
 			}
 		}
 
@@ -328,7 +399,7 @@ func runMigration() error {
 				runCmd("gh", "project", "item-edit", "--project-id", roadmapPID, "--id", newItem.ID,
 					"--field-id", roadWorkstream.ID, "--single-select-option-id", wsOptID)
 			} else {
-				log.Printf("Workstream '%s' not found in roadmap.", ws)
+				slog.Info("Workstream not found in roadmap", "workstream", ws)
 			}
 		}
 
@@ -341,8 +412,8 @@ func runMigration() error {
 				"--field-id", roadTargetDate.ID, "--date", item.TargetDate)
 		}
 
-		if !*dryRun {
-			runCmd("gh", "project", "item-archive", *project, "--id", item.ID, "--owner", "giantswarm")
+		if !cfg.DryRun {
+			runCmd("gh", "project", "item-archive", cfg.Project, "--id", item.ID, "--owner", "giantswarm")
 		}
 	}
 	return nil
