@@ -8,56 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	// Import the new types package.
+	"project-migration/types"
 )
-
-// ----- Data Types for JSON responses -----
-type Project struct {
-	Number int    `json:"number"`
-	ID     string `json:"id"`
-	// ... other fields not required for migration ...
-}
-
-type ProjectList struct {
-	Projects []Project `json:"projects"`
-}
-
-type Option struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-type Field struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Options []Option `json:"options"`
-	// ... type, etc.
-}
-
-type FieldResponse struct {
-	Fields []Field `json:"fields"`
-}
-
-type Content struct {
-	URL   string `json:"url"`
-	Type  string `json:"type"`
-	Title string `json:"title"`
-}
-
-type Item struct {
-	ID         string  `json:"id"`
-	Title      string  `json:"title"`
-	Content    Content `json:"content"`
-	Status     string  `json:"status"`
-	Kind       string  `json:"kind"`
-	Workstream string  `json:"workstream"`
-	StartDate  string  `json:"start Date"`
-	TargetDate string  `json:"target Date"`
-	// ... other fields ...
-}
-
-type ItemList struct {
-	Items []Item `json:"items"`
-}
 
 // ----- Constants -----
 const (
@@ -79,7 +33,7 @@ func runGh(args ...string) (string, error) {
 }
 
 // findField searches for a field with a given name in a slice of fields.
-func findField(fields []Field, name string) *Field {
+func findField(fields []types.Field, name string) *types.Field {
 	for i := range fields {
 		if fields[i].Name == name {
 			return &fields[i]
@@ -89,7 +43,7 @@ func findField(fields []Field, name string) *Field {
 }
 
 // findOptionByName searches for an option with the provided name in a field.
-func findOptionByName(field *Field, name string) *Option {
+func findOptionByName(field *types.Field, name string) *types.Option {
 	if field == nil {
 		return nil
 	}
@@ -102,7 +56,7 @@ func findOptionByName(field *Field, name string) *Option {
 }
 
 // findOptionByPrefix searches for an option whose name starts with the provided prefix.
-func findOptionByPrefix(field *Field, prefix string) *Option {
+func findOptionByPrefix(field *types.Field, prefix string) *types.Option {
 	if field == nil {
 		return nil
 	}
@@ -149,12 +103,12 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	var projList ProjectList
+	var projList types.ProjectList
 	if err := json.Unmarshal([]byte(out), &projList); err != nil {
 		fmt.Printf("Error parsing project list: %v\n", err)
 		os.Exit(1)
 	}
-	var sourceProject *Project
+	var sourceProject *types.Project
 	for _, p := range projList.Projects {
 		// Convert project number to string comparison if necessary.
 		if fmt.Sprintf("%d", p.Number) == *projectFlag {
@@ -173,7 +127,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	var projectFields FieldResponse
+	var projectFields types.FieldResponse
 	if err := json.Unmarshal([]byte(projectFieldsOut), &projectFields); err != nil {
 		fmt.Printf("Error parsing project fields: %v\n", err)
 		os.Exit(1)
@@ -184,7 +138,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	var roadmapFields FieldResponse
+	var roadmapFields types.FieldResponse
 	if err := json.Unmarshal([]byte(roadmapFieldsOut), &roadmapFields); err != nil {
 		fmt.Printf("Error parsing roadmap fields: %v\n", err)
 		os.Exit(1)
@@ -279,7 +233,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	var itemList ItemList
+	var itemList types.ItemList
 	if err := json.Unmarshal([]byte(itemsOut), &itemList); err != nil {
 		fmt.Printf("Error parsing item list: %v\n", err)
 		os.Exit(1)

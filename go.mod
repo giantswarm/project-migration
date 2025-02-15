@@ -1,3 +1,3 @@
-module giantswarm.io/project-migration
+module project-migration
 
-go 1.24.0
+go 1.24

@@ -1,11 +1,18 @@
-# Github project migration to Giant Swarm Roadmap
-This repository contains a script to migrate Giant Swarm Github projects to the Giant Swarm Roadmap project.
+# Github Project Migration to Giant Swarm Roadmap
 
-# Dependencies
-* gh cli tool (https://cli.github.com/)
-* jq (https://stedolan.github.io/jq/)
+This repository contains a Go tool that replicates the functionality of the original bash script. It migrates GitHub project issues to the Giant Swarm Roadmap board.
 
-# Usage
+## Dependencies
+- [gh CLI tool](https://cli.github.com/)
+- [jq](https://stedolan.github.io/jq/) (used in original script, not required by this Go tool)
+
+## Build
+To build the project run:
+```
+go build -o project-migration
+```
+
+## Usage
 ```
 ./project-migration <arguments>
   -h  Help
@@ -16,18 +23,17 @@ This repository contains a script to migrate Giant Swarm Github projects to the 
   -f  Function (eg 'Product Strategy')
 ```
 
-# Example
-## Migrate a team
+## Example
+### Migrate a team
 ```bash
 ./project-migration -p 301 -t team -n Rocket -a KaaS -f 'Product Strategy'
 ```
 
-## Migrate a SIG
+### Migrate a SIG
 ```bash
 ./project-migration -p 302 -t sig -n 'Docs'
 ```
 
-## Migration a WG
+### Migrate a WG
 ```bash
 ./project-migration -p 303 -t wg -n 'Smart Factory' -a KaaS -f 'Product Strategy'
-```
