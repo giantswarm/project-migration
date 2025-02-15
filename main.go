@@ -15,7 +15,6 @@ import (
 const (
 	roadmap          = "273"
 	roadmapProjectID = "PVT_kwDOAHNM9M4ABvWx"
-	ghOwnerFlags     = "--owner giantswarm -L 10000 --format json"
 )
 
 // findField searches for a field with a given name in a slice of fields.
@@ -77,7 +76,7 @@ func main() {
 	}
 
 	// ----- Retrieve project details -----
-	out, err := gh.ListProjects(strings.Split(ghOwnerFlags, " ")...)
+	out, err := gh.ListProjects()
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -100,7 +99,7 @@ func main() {
 	}
 
 	// ----- Retrieve field details for both source project and roadmap -----
-	projectFieldsOut, err := gh.GetFieldList(opts.Project, strings.Split(ghOwnerFlags, " ")...)
+	projectFieldsOut, err := gh.GetFieldList(opts.Project)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -111,7 +110,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	roadmapFieldsOut, err := gh.GetFieldList(roadmap, strings.Split(ghOwnerFlags, " ")...)
+	roadmapFieldsOut, err := gh.GetFieldList(roadmap)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -203,7 +202,7 @@ func main() {
 	roadTargetDateID := getFieldID("Target Date")
 
 	// ----- Retrieve items (issues) from the source project -----
-	itemsOut, err := gh.GetItemList(opts.Project, strings.Split(ghOwnerFlags, " ")...)
+	itemsOut, err := gh.GetItemList(opts.Project)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

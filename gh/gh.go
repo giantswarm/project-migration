@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
+
+const ownerFlags = "--owner giantswarm -L 10000 --format json"
 
 // run is an internal helper to execute the gh command.
 func run(args ...string) (string, error) {
@@ -19,20 +22,29 @@ func run(args ...string) (string, error) {
 	return out.String(), nil
 }
 
-// ListProjects executes "gh project list" with additional flags.
+// ListProjects executes "gh project list" with default flags if none are provided.
 func ListProjects(flags ...string) (string, error) {
+	if len(flags) == 0 {
+		flags = strings.Split(ownerFlags, " ")
+	}
 	args := append([]string{"project", "list"}, flags...)
 	return run(args...)
 }
 
-// GetFieldList executes "gh project field-list <project>" with additional flags.
+// GetFieldList executes "gh project field-list <project>" with default flags if none are provided.
 func GetFieldList(project string, flags ...string) (string, error) {
+	if len(flags) == 0 {
+		flags = strings.Split(ownerFlags, " ")
+	}
 	args := append([]string{"project", "field-list", project}, flags...)
 	return run(args...)
 }
 
-// GetItemList executes "gh project item-list <project>" with additional flags.
+// GetItemList executes "gh project item-list <project>" with default flags if none are provided.
 func GetItemList(project string, flags ...string) (string, error) {
+	if len(flags) == 0 {
+		flags = strings.Split(ownerFlags, " ")
+	}
 	args := append([]string{"project", "item-list", project}, flags...)
 	return run(args...)
 }
