@@ -8,6 +8,7 @@ import (
 
 	"project-migration/cli"
 	"project-migration/gh"
+	"project-migration/logger" // <-- added logger package import
 	"project-migration/types"
 )
 
@@ -59,31 +60,31 @@ func main() {
 
 	// Validate required parameters.
 	if opts.Project == "" {
-		fmt.Println("Project number is missing. Exiting")
+		logger.Logger.Error("Project number is missing. Exiting")
 		os.Exit(1)
 	}
 	if opts.Type == "" {
-		fmt.Println("Type is missing. Exiting")
+		logger.Logger.Error("Type is missing. Exiting")
 		os.Exit(1)
 	}
 	if opts.Name == "" {
-		fmt.Println("Name is missing. Exiting")
+		logger.Logger.Error("Name is missing. Exiting")
 		os.Exit(1)
 	}
 	if opts.Type != "team" && opts.Type != "sig" && opts.Type != "wg" {
-		fmt.Println("Type must be either team, sig or wg. Exiting")
+		logger.Logger.Error("Type must be either team, sig or wg. Exiting")
 		os.Exit(1)
 	}
 
 	// ----- Retrieve project details -----
 	out, err := gh.ListProjects()
 	if err != nil {
-		fmt.Println(err)
+		logger.Logger.Error("Error retrieving project list", "err", err)
 		os.Exit(1)
 	}
 	var projList types.ProjectList
 	if err := json.Unmarshal([]byte(out), &projList); err != nil {
-		fmt.Printf("Error parsing project list: %v\n", err)
+		logger.Logger.Error("Error parsing project list", "err", err)
 		os.Exit(1)
 	}
 	var sourceProject *types.Project
@@ -94,30 +95,30 @@ func main() {
 		}
 	}
 	if sourceProject == nil {
-		fmt.Printf("Project '%s' not found. Exiting\n", opts.Project)
+		logger.Logger.Error("Project not found", "project", opts.Project)
 		os.Exit(1)
 	}
 
 	// ----- Retrieve field details for both source project and roadmap -----
 	projectFieldsOut, err := gh.GetFieldList(opts.Project)
 	if err != nil {
-		fmt.Println(err)
+		logger.Logger.Error("Error retrieving project fields", "err", err)
 		os.Exit(1)
 	}
 	var projectFields types.FieldResponse
 	if err := json.Unmarshal([]byte(projectFieldsOut), &projectFields); err != nil {
-		fmt.Printf("Error parsing project fields: %v\n", err)
+		logger.Logger.Error("Error parsing project fields", "err", err)
 		os.Exit(1)
 	}
 
 	roadmapFieldsOut, err := gh.GetFieldList(roadmap)
 	if err != nil {
-		fmt.Println(err)
+		logger.Logger.Error("Error retrieving roadmap fields", "err", err)
 		os.Exit(1)
 	}
 	var roadmapFields types.FieldResponse
 	if err := json.Unmarshal([]byte(roadmapFieldsOut), &roadmapFields); err != nil {
-		fmt.Printf("Error parsing roadmap fields: %v\n", err)
+		logger.Logger.Error("Error parsing roadmap fields", "err", err)
 		os.Exit(1)
 	}
 
@@ -128,18 +129,18 @@ func main() {
 		projField := findField(projectFields.Fields, fieldName)
 		roadField := findField(roadmapFields.Fields, fieldName)
 		if projField == nil {
-			fmt.Printf("%s field missing in project\n", fieldName)
+			logger.Logger.Error(fmt.Sprintf("%s field missing in project", fieldName))
 			fieldAbort = true
 			continue
 		}
 		if roadField == nil {
-			fmt.Printf("%s field missing in roadmap\n", fieldName)
+			logger.Logger.Error(fmt.Sprintf("%s field missing in roadmap", fieldName))
 			fieldAbort = true
 			continue
 		}
 		for _, projOpt := range projField.Options {
 			if findOptionByName(roadField, projOpt.Name) == nil {
-				fmt.Printf("Project's %s %s doesn't exist in roadmap\n", fieldName, projOpt.Name)
+				logger.Logger.Error(fmt.Sprintf("Project's %s %s doesn't exist in roadmap", fieldName, projOpt.Name))
 				fieldAbort = true
 			}
 		}
@@ -148,38 +149,38 @@ func main() {
 	case "team":
 		teamField := findField(roadmapFields.Fields, "Team")
 		if teamField == nil || findOptionByPrefix(teamField, opts.Name) == nil {
-			fmt.Printf("Team '%s' not found in roadmap\n", opts.Name)
+			logger.Logger.Error(fmt.Sprintf("Team '%s' not found in roadmap", opts.Name))
 			fieldAbort = true
 		}
 	case "sig":
 		sigField := findField(roadmapFields.Fields, "SIG")
 		if sigField == nil || findOptionByPrefix(sigField, opts.Name) == nil {
-			fmt.Printf("SIG '%s' not found in roadmap\n", opts.Name)
+			logger.Logger.Error(fmt.Sprintf("SIG '%s' not found in roadmap", opts.Name))
 			fieldAbort = true
 		}
 	case "wg":
 		wgField := findField(roadmapFields.Fields, "Working Group")
 		if wgField == nil || findOptionByPrefix(wgField, opts.Name) == nil {
-			fmt.Printf("WG '%s' not found in roadmap\n", opts.Name)
+			logger.Logger.Error(fmt.Sprintf("WG '%s' not found in roadmap", opts.Name))
 			fieldAbort = true
 		}
 	}
 	if opts.Area != "" {
 		areaField := findField(roadmapFields.Fields, "Area")
 		if areaField == nil || findOptionByPrefix(areaField, opts.Area) == nil {
-			fmt.Printf("Area '%s' not found in roadmap\n", opts.Area)
+			logger.Logger.Error("Area '%s' not found in roadmap", opts.Area)
 			fieldAbort = true
 		}
 	}
 	if opts.Function != "" {
 		funcField := findField(roadmapFields.Fields, "Function")
 		if funcField == nil || findOptionByPrefix(funcField, opts.Function) == nil {
-			fmt.Printf("Function '%s' not found in roadmap\n", opts.Function)
+			logger.Logger.Error("Function '%s' not found in roadmap", opts.Function)
 			fieldAbort = true
 		}
 	}
 	if fieldAbort {
-		fmt.Println("There are fields in the project board that are not in the roadmap board. Exiting")
+		logger.Logger.Error("There are fields in the project board that are not in the roadmap board. Exiting")
 		os.Exit(1)
 	}
 
@@ -204,32 +205,32 @@ func main() {
 	// ----- Retrieve items (issues) from the source project -----
 	itemsOut, err := gh.GetItemList(opts.Project)
 	if err != nil {
-		fmt.Println(err)
+		logger.Logger.Error("Error retrieving item list", "err", err)
 		os.Exit(1)
 	}
 	var itemList types.ItemList
 	if err := json.Unmarshal([]byte(itemsOut), &itemList); err != nil {
-		fmt.Printf("Error parsing item list: %v\n", err)
+		logger.Logger.Error("Error parsing item list", "err", err)
 		os.Exit(1)
 	}
 
 	// ----- Process each item (migrate item) -----
 	for _, item := range itemList.Items {
 		if item.Content.Type == "DraftIssue" {
-			fmt.Printf("Skipping draft: %s\n", item.Content.Title)
+			logger.Logger.Info("Skipping draft", "title", item.Content.Title)
 			continue
 		}
-		fmt.Printf("Adding issue '%s' to roadmap board\n", item.Title)
+		logger.Logger.Info("Adding issue to roadmap board", "title", item.Title)
 		addOut, err := gh.AddItem(roadmap, item.Content.URL)
 		if err != nil {
-			fmt.Printf("Error adding item: %v\n", err)
+			logger.Logger.Error("Error adding item", "err", err)
 			continue
 		}
 		var added struct {
 			ID string `json:"id"`
 		}
 		if err := json.Unmarshal([]byte(addOut), &added); err != nil {
-			fmt.Printf("Error parsing new item: %v\n", err)
+			logger.Logger.Error("Error parsing new item", "err", err)
 			continue
 		}
 
@@ -254,7 +255,7 @@ func main() {
 			}
 		}
 		if err != nil {
-			fmt.Printf("Error editing type field for item %s: %v\n", added.ID, err)
+			logger.Logger.Error("Error editing type field for item %s: %v\n", added.ID, err)
 		}
 
 		if opts.Area != "" {
@@ -262,7 +263,7 @@ func main() {
 			if opt := findOptionByPrefix(areaField, opts.Area); opt != nil {
 				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadAreaID, opt.ID)
 				if err != nil {
-					fmt.Printf("Error editing area field for item %s: %v\n", added.ID, err)
+					logger.Logger.Error("Error editing area field for item %s: %v\n", added.ID, err)
 				}
 			}
 		}
@@ -271,7 +272,7 @@ func main() {
 			if opt := findOptionByPrefix(funcField, opts.Function); opt != nil {
 				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadFunctionID, opt.ID)
 				if err != nil {
-					fmt.Printf("Error editing function field for item %s: %v\n", added.ID, err)
+					logger.Logger.Error("Error editing function field for item %s: %v\n", added.ID, err)
 				}
 			}
 		}
@@ -281,10 +282,10 @@ func main() {
 			if opt := findOptionByName(statusField, item.Status); opt != nil {
 				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadStatusID, opt.ID)
 				if err != nil {
-					fmt.Printf("Error editing status for item %s: %v\n", added.ID, err)
+					logger.Logger.Error("Error editing status for item %s: %v\n", added.ID, err)
 				}
 			} else {
-				fmt.Printf("Status '%s' not found in roadmap.\n", item.Status)
+				logger.Logger.Error("Status '%s' not found in roadmap.\n", item.Status)
 			}
 		}
 		if item.Kind != "" {
@@ -292,10 +293,10 @@ func main() {
 			if opt := findOptionByName(kindField, item.Kind); opt != nil {
 				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadKindID, opt.ID)
 				if err != nil {
-					fmt.Printf("Error editing kind for item %s: %v\n", added.ID, err)
+					logger.Logger.Error("Error editing kind for item %s: %v\n", added.ID, err)
 				}
 			} else {
-				fmt.Printf("Kind '%s' not found in roadmap.\n", item.Kind)
+				logger.Logger.Error("Kind '%s' not found in roadmap.\n", item.Kind)
 			}
 		}
 		if item.Workstream != "" {
@@ -303,30 +304,30 @@ func main() {
 			if opt := findOptionByName(worksField, item.Workstream); opt != nil {
 				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadWorkstreamID, opt.ID)
 				if err != nil {
-					fmt.Printf("Error editing workstream for item %s: %v\n", added.ID, err)
+					logger.Logger.Error("Error editing workstream for item %s: %v\n", added.ID, err)
 				}
 			} else {
-				fmt.Printf("Workstream '%s' not found in roadmap.\n", item.Workstream)
+				logger.Logger.Error("Workstream '%s' not found in roadmap.\n", item.Workstream)
 			}
 		}
 
 		if item.StartDate != "" && item.StartDate != "null" {
 			_, err = gh.EditItemDate(roadmapProjectID, added.ID, roadStartDateID, item.StartDate)
 			if err != nil {
-				fmt.Printf("Error editing start date for item %s: %v\n", added.ID, err)
+				logger.Logger.Error("Error editing start date for item %s: %v\n", added.ID, err)
 			}
 		}
 		if item.TargetDate != "" && item.TargetDate != "null" {
 			_, err = gh.EditItemDate(roadmapProjectID, added.ID, roadTargetDateID, item.TargetDate)
 			if err != nil {
-				fmt.Printf("Error editing target date for item %s: %v\n", added.ID, err)
+				logger.Logger.Error("Error editing target date for item %s: %v\n", added.ID, err)
 			}
 		}
 
 		if !opts.DryRun {
 			_, err = gh.ArchiveItem(opts.Project, item.ID)
 			if err != nil {
-				fmt.Printf("Error archiving item %s: %v\n", item.ID, err)
+				logger.Logger.Error("Error archiving item", "id", item.ID, "err", err)
 			}
 		}
 	}
