@@ -28,10 +28,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Retrieve project details using migration package.
-	_, err := migration.RetrieveProject(opts)
-	if err != nil {
-		logger.Logger.Error("Error retrieving project", "err", err)
+	// Retrieve project existence using migration package.
+	exists, err := migration.ProjectExists(opts)
+	if err != nil || !exists {
+		logger.Logger.Error("Project does not exist", "err", err)
 		os.Exit(1)
 	}
 

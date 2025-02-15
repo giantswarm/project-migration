@@ -47,22 +47,22 @@ func findOptionByPrefix(field *types.Field, prefix string) *types.Option {
 
 // --- New Retrieval Functions ---
 
-// RetrieveProject gets the project details using the command-line options.
-func RetrieveProject(opts cli.Options) (*types.Project, error) {
+// ProjectExists checks if the project exists using the command-line options.
+func ProjectExists(opts cli.Options) (bool, error) {
 	out, err := gh.ListProjects()
 	if err != nil {
-		return nil, fmt.Errorf("error retrieving project list: %w", err)
+		return false, fmt.Errorf("error retrieving project list: %w", err)
 	}
 	var projList types.ProjectList
 	if err := json.Unmarshal([]byte(out), &projList); err != nil {
-		return nil, fmt.Errorf("error parsing project list: %w", err)
+		return false, fmt.Errorf("error parsing project list: %w", err)
 	}
 	for _, p := range projList.Projects {
 		if fmt.Sprintf("%d", p.Number) == opts.Project {
-			return &p, nil
+			return true, nil
 		}
 	}
-	return nil, fmt.Errorf("project not found: %s", opts.Project)
+	return false, fmt.Errorf("project not found: %s", opts.Project)
 }
 
 // RetrieveFieldResponses retrieves field responses for both the source project and the roadmap board.
