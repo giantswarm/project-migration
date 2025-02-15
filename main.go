@@ -3,13 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 
-	// Import the new types package.
+	"project-migration/cli"
 	"project-migration/types"
 )
 
@@ -70,28 +69,22 @@ func findOptionByPrefix(field *types.Field, prefix string) *types.Option {
 
 func main() {
 	// ----- Parse command-line flags -----
-	projectFlag := flag.String("p", "", "Project Number (eg 301)")
-	dryRun := flag.Bool("d", false, "Dry run mode")
-	typeFlag := flag.String("t", "", "Type (team, sig, wg)")
-	nameFlag := flag.String("n", "", "Name of Team, SIG or WG")
-	areaFlag := flag.String("a", "", "Area (eg KaaS)")
-	functionFlag := flag.String("f", "", "Function (eg 'Product Strategy')")
-	flag.Parse()
+	opts := cli.ParseFlags()
 
 	// Validate required parameters.
-	if *projectFlag == "" {
+	if opts.Project == "" {
 		fmt.Println("Project number is missing. Exiting")
 		os.Exit(1)
 	}
-	if *typeFlag == "" {
+	if opts.Type == "" {
 		fmt.Println("Type is missing. Exiting")
 		os.Exit(1)
 	}
-	if *nameFlag == "" {
+	if opts.Name == "" {
 		fmt.Println("Name is missing. Exiting")
 		os.Exit(1)
 	}
-	if *typeFlag != "team" && *typeFlag != "sig" && *typeFlag != "wg" {
+	if opts.Type != "team" && opts.Type != "sig" && opts.Type != "wg" {
 		fmt.Println("Type must be either team, sig or wg. Exiting")
 		os.Exit(1)
 	}
@@ -111,18 +104,18 @@ func main() {
 	var sourceProject *types.Project
 	for _, p := range projList.Projects {
 		// Convert project number to string comparison if necessary.
-		if fmt.Sprintf("%d", p.Number) == *projectFlag {
+		if fmt.Sprintf("%d", p.Number) == opts.Project {
 			sourceProject = &p
 			break
 		}
 	}
 	if sourceProject == nil {
-		fmt.Printf("Project '%s' not found. Exiting\n", *projectFlag)
+		fmt.Printf("Project '%s' not found. Exiting\n", opts.Project)
 		os.Exit(1)
 	}
 
 	// ----- Retrieve field details for both source project and roadmap -----
-	projectFieldsOut, err := runGh(append([]string{"project", "field-list", *projectFlag}, strings.Split(ghOwnerFlags, " ")...)...)
+	projectFieldsOut, err := runGh(append([]string{"project", "field-list", opts.Project}, strings.Split(ghOwnerFlags, " ")...)...)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -169,38 +162,38 @@ func main() {
 		}
 	}
 	// Validate type (team, sig, wg) option existence in roadmap.
-	switch *typeFlag {
+	switch opts.Type {
 	case "team":
 		teamField := findField(roadmapFields.Fields, "Team")
-		if teamField == nil || findOptionByPrefix(teamField, *nameFlag) == nil {
-			fmt.Printf("Team '%s' not found in roadmap\n", *nameFlag)
+		if teamField == nil || findOptionByPrefix(teamField, opts.Name) == nil {
+			fmt.Printf("Team '%s' not found in roadmap\n", opts.Name)
 			fieldAbort = true
 		}
 	case "sig":
 		sigField := findField(roadmapFields.Fields, "SIG")
-		if sigField == nil || findOptionByPrefix(sigField, *nameFlag) == nil {
-			fmt.Printf("SIG '%s' not found in roadmap\n", *nameFlag)
+		if sigField == nil || findOptionByPrefix(sigField, opts.Name) == nil {
+			fmt.Printf("SIG '%s' not found in roadmap\n", opts.Name)
 			fieldAbort = true
 		}
 	case "wg":
 		wgField := findField(roadmapFields.Fields, "Working Group")
-		if wgField == nil || findOptionByPrefix(wgField, *nameFlag) == nil {
-			fmt.Printf("WG '%s' not found in roadmap\n", *nameFlag)
+		if wgField == nil || findOptionByPrefix(wgField, opts.Name) == nil {
+			fmt.Printf("WG '%s' not found in roadmap\n", opts.Name)
 			fieldAbort = true
 		}
 	}
 	// Validate optional fields.
-	if *areaFlag != "" {
+	if opts.Area != "" {
 		areaField := findField(roadmapFields.Fields, "Area")
-		if areaField == nil || findOptionByPrefix(areaField, *areaFlag) == nil {
-			fmt.Printf("Area '%s' not found in roadmap\n", *areaFlag)
+		if areaField == nil || findOptionByPrefix(areaField, opts.Area) == nil {
+			fmt.Printf("Area '%s' not found in roadmap\n", opts.Area)
 			fieldAbort = true
 		}
 	}
-	if *functionFlag != "" {
+	if opts.Function != "" {
 		funcField := findField(roadmapFields.Fields, "Function")
-		if funcField == nil || findOptionByPrefix(funcField, *functionFlag) == nil {
-			fmt.Printf("Function '%s' not found in roadmap\n", *functionFlag)
+		if funcField == nil || findOptionByPrefix(funcField, opts.Function) == nil {
+			fmt.Printf("Function '%s' not found in roadmap\n", opts.Function)
 			fieldAbort = true
 		}
 	}
@@ -228,7 +221,7 @@ func main() {
 	roadTargetDateID := getFieldID("Target Date")
 
 	// ----- Retrieve items (issues) from the source project -----
-	itemsOut, err := runGh(append([]string{"project", "item-list", *projectFlag}, strings.Split(ghOwnerFlags, " ")...)...)
+	itemsOut, err := runGh(append([]string{"project", "item-list", opts.Project}, strings.Split(ghOwnerFlags, " ")...)...)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -262,22 +255,22 @@ func main() {
 		}
 
 		// ----- Edit type field based on provided type -----
-		switch *typeFlag {
+		switch opts.Type {
 		case "team":
 			teamField := findField(roadmapFields.Fields, "Team")
-			opt := findOptionByPrefix(teamField, *nameFlag)
+			opt := findOptionByPrefix(teamField, opts.Name)
 			if opt != nil {
 				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadTeamID, "--single-select-option-id", opt.ID)
 			}
 		case "sig":
 			sigField := findField(roadmapFields.Fields, "SIG")
-			opt := findOptionByPrefix(sigField, *nameFlag)
+			opt := findOptionByPrefix(sigField, opts.Name)
 			if opt != nil {
 				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadSigID, "--single-select-option-id", opt.ID)
 			}
 		case "wg":
 			wgField := findField(roadmapFields.Fields, "Working Group")
-			opt := findOptionByPrefix(wgField, *nameFlag)
+			opt := findOptionByPrefix(wgField, opts.Name)
 			if opt != nil {
 				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadWGID, "--single-select-option-id", opt.ID)
 			}
@@ -287,18 +280,18 @@ func main() {
 		}
 
 		// ----- Optional fields: Area and Function -----
-		if *areaFlag != "" {
+		if opts.Area != "" {
 			areaField := findField(roadmapFields.Fields, "Area")
-			if opt := findOptionByPrefix(areaField, *areaFlag); opt != nil {
+			if opt := findOptionByPrefix(areaField, opts.Area); opt != nil {
 				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadAreaID, "--single-select-option-id", opt.ID)
 				if err != nil {
 					fmt.Printf("Error editing area field for item %s: %v\n", added.ID, err)
 				}
 			}
 		}
-		if *functionFlag != "" {
+		if opts.Function != "" {
 			funcField := findField(roadmapFields.Fields, "Function")
-			if opt := findOptionByPrefix(funcField, *functionFlag); opt != nil {
+			if opt := findOptionByPrefix(funcField, opts.Function); opt != nil {
 				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadFunctionID, "--single-select-option-id", opt.ID)
 				if err != nil {
 					fmt.Printf("Error editing function field for item %s: %v\n", added.ID, err)
@@ -356,8 +349,8 @@ func main() {
 		}
 
 		// ----- Archive the original item if not in dry-run mode -----
-		if !*dryRun {
-			_, err = runGh("project", "item-archive", *projectFlag, "--id", item.ID, "--owner", "giantswarm")
+		if !opts.DryRun {
+			_, err = runGh("project", "item-archive", opts.Project, "--id", item.ID, "--owner", "giantswarm")
 			if err != nil {
 				fmt.Printf("Error archiving item %s: %v\n", item.ID, err)
 			}
