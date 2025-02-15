@@ -9,6 +9,9 @@ import (
 	"log/slog"
 )
 
+// New: add a package-level variable for command execution.
+var execCommand = exec.Command
+
 // Client defines a human‐readable interface for GitHub project commands.
 type Client interface {
 	ListProjects() (string, error)
@@ -32,7 +35,8 @@ func (c *clientImpl) runCmd(cmdStr string, args ...string) (string, error) {
 	if c.Verbose {
 		slog.Info("Executing command", "cmd", cmdLine)
 	}
-	cmd := exec.Command(cmdStr, args...)
+	// Use execCommand instead of exec.Command.
+	cmd := execCommand(cmdStr, args...)
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	cmd.Stdout = &out
