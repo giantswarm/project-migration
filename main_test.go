@@ -5,7 +5,10 @@ import (
 	"testing"
 
 	"giantswarm.io/project-migration/cli"
+	"giantswarm.io/project-migration/migration" // new import
 )
+
+const roadmap = "273" // added constant for roadmap
 
 // stubClient implements github.Client for testing.
 type stubClient struct{}
@@ -78,7 +81,8 @@ func TestRunMigrationSuccess(t *testing.T) {
 		DryRun:   true,
 		Verbose:  false,
 	}
-	if err := runMigration(cfg, stub); err != nil {
+	// Updated to use migration.Run instead of runMigration.
+	if err := migration.Run(cfg, stub); err != nil {
 		t.Errorf("Expected migration to succeed, got error: %v", err)
 	}
 }
@@ -90,8 +94,8 @@ func TestRunMigrationMissingProject(t *testing.T) {
 		Type:    "team",
 		Name:    "Rocket",
 	}
-
-	if err := runMigration(cfg, stub); err == nil {
+	// Updated to use migration.Run.
+	if err := migration.Run(cfg, stub); err == nil {
 		t.Errorf("Expected error for missing project number")
 	}
 }
