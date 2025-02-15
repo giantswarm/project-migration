@@ -28,11 +28,13 @@ func Run(cfg *cli.Config, gh github.Client) error {
 	if err := validateConfig(cfg); err != nil {
 		return err
 	}
+	slog.Info("Configuration validated")
 
 	projects, err := fetchProjects(gh)
 	if err != nil {
 		return err
 	}
+	slog.Info("Projects fetched", "count", len(projects))
 
 	req, err := strconv.Atoi(cfg.Project)
 	if err != nil {
@@ -41,24 +43,31 @@ func Run(cfg *cli.Config, gh github.Client) error {
 	if !projectExists(projects, req) {
 		return fmt.Errorf("project '%s' not found. Exiting", cfg.Project)
 	}
+	slog.Info("Project exists", "project", cfg.Project)
 
 	projFields, err := fetchFields(gh, cfg.Project)
 	if err != nil {
 		return err
 	}
+	slog.Info("Project fields fetched")
 	roadFields, err := fetchFields(gh, roadmap)
 	if err != nil {
 		return err
 	}
+	slog.Info("Roadmap fields fetched")
+
 	if err := validateRequiredFields(projFields.Fields, roadFields.Fields); err != nil {
 		return err
 	}
+	slog.Info("Required fields validated")
 
 	typeOptionID, err := getTypeOptionID(cfg, roadFields.Fields)
 	if err != nil {
 		return err
 	}
+	slog.Info("Obtained type option ID", "optionID", typeOptionID)
 
+	slog.Info("Starting migration process for items")
 	return processItems(cfg, gh, roadFields.Fields, typeOptionID)
 }
 
@@ -96,7 +105,6 @@ func fetchProjects(gh github.Client) ([]types.Project, error) {
 			return nil, fmt.Errorf("error parsing projects: %v; error2: %v", err, err2)
 		}
 	}
-	slog.Info("Retrieved projects", "projects", projects)
 	return projects, nil
 }
 
