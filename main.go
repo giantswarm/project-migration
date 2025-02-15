@@ -1,14 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"project-migration/cli"
+	"project-migration/gh"
 	"project-migration/types"
 )
 
@@ -18,18 +17,6 @@ const (
 	roadmapProjectID = "PVT_kwDOAHNM9M4ABvWx"
 	ghOwnerFlags     = "--owner giantswarm -L 10000 --format json"
 )
-
-// runGh runs a GitHub CLI command with provided arguments and returns its output.
-func runGh(args ...string) (string, error) {
-	cmd := exec.Command("gh", args...)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("error running gh %v: %w", args, err)
-	}
-	return out.String(), nil
-}
 
 // findField searches for a field with a given name in a slice of fields.
 func findField(fields []types.Field, name string) *types.Field {
@@ -90,8 +77,7 @@ func main() {
 	}
 
 	// ----- Retrieve project details -----
-	// Call "gh project list" and find the specific project by number.
-	out, err := runGh(append([]string{"project", "list"}, strings.Split(ghOwnerFlags, " ")...)...)
+	out, err := gh.ListProjects(strings.Split(ghOwnerFlags, " ")...)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -103,7 +89,6 @@ func main() {
 	}
 	var sourceProject *types.Project
 	for _, p := range projList.Projects {
-		// Convert project number to string comparison if necessary.
 		if fmt.Sprintf("%d", p.Number) == opts.Project {
 			sourceProject = &p
 			break
@@ -115,7 +100,7 @@ func main() {
 	}
 
 	// ----- Retrieve field details for both source project and roadmap -----
-	projectFieldsOut, err := runGh(append([]string{"project", "field-list", opts.Project}, strings.Split(ghOwnerFlags, " ")...)...)
+	projectFieldsOut, err := gh.GetFieldList(opts.Project, strings.Split(ghOwnerFlags, " ")...)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -126,7 +111,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	roadmapFieldsOut, err := runGh(append([]string{"project", "field-list", roadmap}, strings.Split(ghOwnerFlags, " ")...)...)
+	roadmapFieldsOut, err := gh.GetFieldList(roadmap, strings.Split(ghOwnerFlags, " ")...)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -153,7 +138,6 @@ func main() {
 			fieldAbort = true
 			continue
 		}
-		// For each option in the project field, check if it exists in the roadmap field.
 		for _, projOpt := range projField.Options {
 			if findOptionByName(roadField, projOpt.Name) == nil {
 				fmt.Printf("Project's %s %s doesn't exist in roadmap\n", fieldName, projOpt.Name)
@@ -161,7 +145,6 @@ func main() {
 			}
 		}
 	}
-	// Validate type (team, sig, wg) option existence in roadmap.
 	switch opts.Type {
 	case "team":
 		teamField := findField(roadmapFields.Fields, "Team")
@@ -182,7 +165,6 @@ func main() {
 			fieldAbort = true
 		}
 	}
-	// Validate optional fields.
 	if opts.Area != "" {
 		areaField := findField(roadmapFields.Fields, "Area")
 		if areaField == nil || findOptionByPrefix(areaField, opts.Area) == nil {
@@ -221,7 +203,7 @@ func main() {
 	roadTargetDateID := getFieldID("Target Date")
 
 	// ----- Retrieve items (issues) from the source project -----
-	itemsOut, err := runGh(append([]string{"project", "item-list", opts.Project}, strings.Split(ghOwnerFlags, " ")...)...)
+	itemsOut, err := gh.GetItemList(opts.Project, strings.Split(ghOwnerFlags, " ")...)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -234,14 +216,12 @@ func main() {
 
 	// ----- Process each item (migrate item) -----
 	for _, item := range itemList.Items {
-		// Skip items of type DraftIssue.
 		if item.Content.Type == "DraftIssue" {
 			fmt.Printf("Skipping draft: %s\n", item.Content.Title)
 			continue
 		}
 		fmt.Printf("Adding issue '%s' to roadmap board\n", item.Title)
-		// Add the item to the roadmap.
-		addOut, err := runGh("project", "item-add", roadmap, "--owner", "giantswarm", "--format", "json", "--url", item.Content.URL)
+		addOut, err := gh.AddItem(roadmap, item.Content.URL)
 		if err != nil {
 			fmt.Printf("Error adding item: %v\n", err)
 			continue
@@ -254,36 +234,34 @@ func main() {
 			continue
 		}
 
-		// ----- Edit type field based on provided type -----
 		switch opts.Type {
 		case "team":
 			teamField := findField(roadmapFields.Fields, "Team")
 			opt := findOptionByPrefix(teamField, opts.Name)
 			if opt != nil {
-				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadTeamID, "--single-select-option-id", opt.ID)
+				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadTeamID, opt.ID)
 			}
 		case "sig":
 			sigField := findField(roadmapFields.Fields, "SIG")
 			opt := findOptionByPrefix(sigField, opts.Name)
 			if opt != nil {
-				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadSigID, "--single-select-option-id", opt.ID)
+				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadSigID, opt.ID)
 			}
 		case "wg":
 			wgField := findField(roadmapFields.Fields, "Working Group")
 			opt := findOptionByPrefix(wgField, opts.Name)
 			if opt != nil {
-				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadWGID, "--single-select-option-id", opt.ID)
+				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadWGID, opt.ID)
 			}
 		}
 		if err != nil {
 			fmt.Printf("Error editing type field for item %s: %v\n", added.ID, err)
 		}
 
-		// ----- Optional fields: Area and Function -----
 		if opts.Area != "" {
 			areaField := findField(roadmapFields.Fields, "Area")
 			if opt := findOptionByPrefix(areaField, opts.Area); opt != nil {
-				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadAreaID, "--single-select-option-id", opt.ID)
+				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadAreaID, opt.ID)
 				if err != nil {
 					fmt.Printf("Error editing area field for item %s: %v\n", added.ID, err)
 				}
@@ -292,18 +270,17 @@ func main() {
 		if opts.Function != "" {
 			funcField := findField(roadmapFields.Fields, "Function")
 			if opt := findOptionByPrefix(funcField, opts.Function); opt != nil {
-				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadFunctionID, "--single-select-option-id", opt.ID)
+				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadFunctionID, opt.ID)
 				if err != nil {
 					fmt.Printf("Error editing function field for item %s: %v\n", added.ID, err)
 				}
 			}
 		}
 
-		// ----- Update Status, Kind, and Workstream fields -----
 		if item.Status != "" {
 			statusField := findField(roadmapFields.Fields, "Status")
 			if opt := findOptionByName(statusField, item.Status); opt != nil {
-				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadStatusID, "--single-select-option-id", opt.ID)
+				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadStatusID, opt.ID)
 				if err != nil {
 					fmt.Printf("Error editing status for item %s: %v\n", added.ID, err)
 				}
@@ -314,7 +291,7 @@ func main() {
 		if item.Kind != "" {
 			kindField := findField(roadmapFields.Fields, "Kind")
 			if opt := findOptionByName(kindField, item.Kind); opt != nil {
-				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadKindID, "--single-select-option-id", opt.ID)
+				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadKindID, opt.ID)
 				if err != nil {
 					fmt.Printf("Error editing kind for item %s: %v\n", added.ID, err)
 				}
@@ -325,7 +302,7 @@ func main() {
 		if item.Workstream != "" {
 			worksField := findField(roadmapFields.Fields, "Workstream")
 			if opt := findOptionByName(worksField, item.Workstream); opt != nil {
-				_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadWorkstreamID, "--single-select-option-id", opt.ID)
+				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, roadWorkstreamID, opt.ID)
 				if err != nil {
 					fmt.Printf("Error editing workstream for item %s: %v\n", added.ID, err)
 				}
@@ -334,23 +311,21 @@ func main() {
 			}
 		}
 
-		// ----- Update date fields (Start Date and Target Date) -----
 		if item.StartDate != "" && item.StartDate != "null" {
-			_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadStartDateID, "--date", item.StartDate)
+			_, err = gh.EditItemDate(roadmapProjectID, added.ID, roadStartDateID, item.StartDate)
 			if err != nil {
 				fmt.Printf("Error editing start date for item %s: %v\n", added.ID, err)
 			}
 		}
 		if item.TargetDate != "" && item.TargetDate != "null" {
-			_, err = runGh("project", "item-edit", "--project-id", roadmapProjectID, "--id", added.ID, "--field-id", roadTargetDateID, "--date", item.TargetDate)
+			_, err = gh.EditItemDate(roadmapProjectID, added.ID, roadTargetDateID, item.TargetDate)
 			if err != nil {
 				fmt.Printf("Error editing target date for item %s: %v\n", added.ID, err)
 			}
 		}
 
-		// ----- Archive the original item if not in dry-run mode -----
 		if !opts.DryRun {
-			_, err = runGh("project", "item-archive", opts.Project, "--id", item.ID, "--owner", "giantswarm")
+			_, err = gh.ArchiveItem(opts.Project, item.ID)
 			if err != nil {
 				fmt.Printf("Error archiving item %s: %v\n", item.ID, err)
 			}
