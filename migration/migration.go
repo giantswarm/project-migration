@@ -65,13 +65,13 @@ func ProjectExists(opts cli.Options) (bool, error) {
 	return false, fmt.Errorf("project not found: %s", opts.Project)
 }
 
-// RetrieveFieldResponses retrieves field responses for both the source project and the roadmap board.
-func RetrieveFieldResponses(project, roadmap string) (*types.FieldResponse, *types.FieldResponse, error) {
+// GetFields retrieves field responses for both the source project and the roadmap board.
+func GetFields(project, roadmap string) (*types.Fields, *types.Fields, error) {
 	projFieldsOut, err := gh.GetFieldList(project)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error retrieving project fields: %w", err)
 	}
-	var projectFields types.FieldResponse
+	var projectFields types.Fields
 	if err := json.Unmarshal([]byte(projFieldsOut), &projectFields); err != nil {
 		return nil, nil, fmt.Errorf("error parsing project fields: %w", err)
 	}
@@ -80,7 +80,7 @@ func RetrieveFieldResponses(project, roadmap string) (*types.FieldResponse, *typ
 	if err != nil {
 		return nil, nil, fmt.Errorf("error retrieving roadmap fields: %w", err)
 	}
-	var roadmapFields types.FieldResponse
+	var roadmapFields types.Fields
 	if err := json.Unmarshal([]byte(roadmapFieldsOut), &roadmapFields); err != nil {
 		return nil, nil, fmt.Errorf("error parsing roadmap fields: %w", err)
 	}
@@ -90,7 +90,7 @@ func RetrieveFieldResponses(project, roadmap string) (*types.FieldResponse, *typ
 
 // ValidateFields checks for existence of required fields and options.
 // Returns an error with all messages concatenated if any validations fail.
-func ValidateFields(projectFields, roadmapFields *types.FieldResponse, opts cli.Options) error {
+func ValidateFields(projectFields, roadmapFields *types.Fields, opts cli.Options) error {
 	var errMsg string
 	required := []string{"Status", "Kind", "Workstream"}
 	for _, fieldName := range required {
@@ -147,7 +147,7 @@ func ValidateFields(projectFields, roadmapFields *types.FieldResponse, opts cli.
 
 // MigrateItems retrieves and processes items from the source project and applies the migration.
 // It uses the roadmap board number, roadmap project ID, and the roadmap fields.
-func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFields *types.FieldResponse) error {
+func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFields *types.Fields) error {
 	// Retrieve items from source project.
 	itemsOut, err := gh.GetItemList(opts.Project)
 	if err != nil {

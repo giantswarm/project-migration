@@ -36,7 +36,7 @@ func main() {
 	}
 
 	// Retrieve field responses for the source project and the roadmap.
-	projectFields, roadmapFields, err := migration.RetrieveFieldResponses(opts.Project, roadmap)
+	projectFields, roadmapFields, err := migration.GetFields(opts.Project, roadmap)
 	if err != nil {
 		logger.Logger.Error("Error retrieving field responses", "err", err)
 		os.Exit(1)

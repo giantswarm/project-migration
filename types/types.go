@@ -21,7 +21,8 @@ type Field struct {
 	Options []Option `json:"options"`
 }
 
-type FieldResponse struct {
+// Renamed FieldResponse to Fields.
+type Fields struct {
 	Fields []Field `json:"fields"`
 }
 
