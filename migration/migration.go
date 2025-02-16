@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"project-migration/cli"
-	"project-migration/gh"
+	"project-migration/ghprojects"
 	"project-migration/logger"
 	"project-migration/types"
 )
@@ -49,7 +49,7 @@ func findOptionByPrefix(field *types.Field, prefix string) *types.Option {
 
 // ProjectExists checks if the project exists using the command-line options.
 func ProjectExists(opts cli.Options) (bool, error) {
-	out, err := gh.ListProjects()
+	out, err := ghprojects.ListProjects()
 	if err != nil {
 		return false, fmt.Errorf("error retrieving project list: %w", err)
 	}
@@ -67,7 +67,7 @@ func ProjectExists(opts cli.Options) (bool, error) {
 
 // GetFields retrieves field responses for both the source project and the roadmap board.
 func GetFields(project, roadmap string) (*types.Fields, *types.Fields, error) {
-	projFieldsOut, err := gh.GetFieldList(project)
+	projFieldsOut, err := ghprojects.GetFieldList(project)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error retrieving project fields: %w", err)
 	}
@@ -76,7 +76,7 @@ func GetFields(project, roadmap string) (*types.Fields, *types.Fields, error) {
 		return nil, nil, fmt.Errorf("error parsing project fields: %w", err)
 	}
 
-	roadmapFieldsOut, err := gh.GetFieldList(roadmap)
+	roadmapFieldsOut, err := ghprojects.GetFieldList(roadmap)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error retrieving roadmap fields: %w", err)
 	}
@@ -149,7 +149,7 @@ func ValidateFields(projectFields, roadmapFields *types.Fields, opts cli.Options
 // It uses the roadmap board number, roadmap project ID, and the roadmap fields.
 func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFields *types.Fields) error {
 	// Retrieve items from source project.
-	itemsOut, err := gh.GetItemList(opts.Project)
+	itemsOut, err := ghprojects.GetItemList(opts.Project)
 	if err != nil {
 		return fmt.Errorf("error retrieving item list: %w", err)
 	}
@@ -165,7 +165,7 @@ func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFie
 			continue
 		}
 		logger.Logger.Info("Adding issue to roadmap board", "title", item.Title)
-		addOut, err := gh.AddItem(roadmap, item.Content.URL)
+		addOut, err := ghprojects.AddItem(roadmap, item.Content.URL)
 		if err != nil {
 			logger.Logger.Error("Error adding item", "err", err)
 			continue
@@ -183,17 +183,17 @@ func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFie
 		case "team":
 			teamField := findField(roadmapFields.Fields, "Team")
 			if opt := findOptionByPrefix(teamField, opts.Name); opt != nil {
-				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, teamField.ID, opt.ID)
+				_, err = ghprojects.EditItemSingle(roadmapProjectID, added.ID, teamField.ID, opt.ID)
 			}
 		case "sig":
 			sigField := findField(roadmapFields.Fields, "SIG")
 			if opt := findOptionByPrefix(sigField, opts.Name); opt != nil {
-				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, sigField.ID, opt.ID)
+				_, err = ghprojects.EditItemSingle(roadmapProjectID, added.ID, sigField.ID, opt.ID)
 			}
 		case "wg":
 			wgField := findField(roadmapFields.Fields, "Working Group")
 			if opt := findOptionByPrefix(wgField, opts.Name); opt != nil {
-				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, wgField.ID, opt.ID)
+				_, err = ghprojects.EditItemSingle(roadmapProjectID, added.ID, wgField.ID, opt.ID)
 			}
 		}
 		if err != nil {
@@ -204,7 +204,7 @@ func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFie
 		if opts.Area != "" {
 			areaField := findField(roadmapFields.Fields, "Area")
 			if opt := findOptionByPrefix(areaField, opts.Area); opt != nil {
-				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, areaField.ID, opt.ID)
+				_, err = ghprojects.EditItemSingle(roadmapProjectID, added.ID, areaField.ID, opt.ID)
 				if err != nil {
 					logger.Logger.Error(fmt.Sprintf("Error editing area field for item %s: %v", added.ID, err))
 				}
@@ -213,7 +213,7 @@ func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFie
 		if opts.Function != "" {
 			funcField := findField(roadmapFields.Fields, "Function")
 			if opt := findOptionByPrefix(funcField, opts.Function); opt != nil {
-				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, funcField.ID, opt.ID)
+				_, err = ghprojects.EditItemSingle(roadmapProjectID, added.ID, funcField.ID, opt.ID)
 				if err != nil {
 					logger.Logger.Error(fmt.Sprintf("Error editing function field for item %s: %v", added.ID, err))
 				}
@@ -224,7 +224,7 @@ func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFie
 		if item.Status != "" {
 			statusField := findField(roadmapFields.Fields, "Status")
 			if opt := findOptionByName(statusField, item.Status); opt != nil {
-				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, statusField.ID, opt.ID)
+				_, err = ghprojects.EditItemSingle(roadmapProjectID, added.ID, statusField.ID, opt.ID)
 				if err != nil {
 					logger.Logger.Error(fmt.Sprintf("Error editing status for item %s: %v", added.ID, err))
 				}
@@ -235,7 +235,7 @@ func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFie
 		if item.Kind != "" {
 			kindField := findField(roadmapFields.Fields, "Kind")
 			if opt := findOptionByName(kindField, item.Kind); opt != nil {
-				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, kindField.ID, opt.ID)
+				_, err = ghprojects.EditItemSingle(roadmapProjectID, added.ID, kindField.ID, opt.ID)
 				if err != nil {
 					logger.Logger.Error(fmt.Sprintf("Error editing kind for item %s: %v", added.ID, err))
 				}
@@ -246,7 +246,7 @@ func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFie
 		if item.Workstream != "" {
 			worksField := findField(roadmapFields.Fields, "Workstream")
 			if opt := findOptionByName(worksField, item.Workstream); opt != nil {
-				_, err = gh.EditItemSingle(roadmapProjectID, added.ID, worksField.ID, opt.ID)
+				_, err = ghprojects.EditItemSingle(roadmapProjectID, added.ID, worksField.ID, opt.ID)
 				if err != nil {
 					logger.Logger.Error(fmt.Sprintf("Error editing workstream for item %s: %v", added.ID, err))
 				}
@@ -258,7 +258,7 @@ func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFie
 		if item.StartDate != "" && item.StartDate != "null" {
 			startDateField := findField(roadmapFields.Fields, "Start Date")
 			if startDateField != nil {
-				_, err = gh.EditItemDate(roadmapProjectID, added.ID, startDateField.ID, item.StartDate)
+				_, err = ghprojects.EditItemDate(roadmapProjectID, added.ID, startDateField.ID, item.StartDate)
 				if err != nil {
 					logger.Logger.Error(fmt.Sprintf("Error editing start date for item %s: %v", added.ID, err))
 				}
@@ -267,7 +267,7 @@ func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFie
 		if item.TargetDate != "" && item.TargetDate != "null" {
 			targetDateField := findField(roadmapFields.Fields, "Target Date")
 			if targetDateField != nil {
-				_, err = gh.EditItemDate(roadmapProjectID, added.ID, targetDateField.ID, item.TargetDate)
+				_, err = ghprojects.EditItemDate(roadmapProjectID, added.ID, targetDateField.ID, item.TargetDate)
 				if err != nil {
 					logger.Logger.Error(fmt.Sprintf("Error editing target date for item %s: %v", added.ID, err))
 				}
@@ -275,7 +275,7 @@ func MigrateItems(opts cli.Options, roadmap, roadmapProjectID string, roadmapFie
 		}
 
 		if !opts.DryRun {
-			_, err = gh.ArchiveItem(opts.Project, item.ID)
+			_, err = ghprojects.ArchiveItem(opts.Project, item.ID)
 			if err != nil {
 				logger.Logger.Error("Error archiving item", "id", item.ID, "err", err)
 			}
