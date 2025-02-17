@@ -28,6 +28,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// If running in test mode, skip external calls.
+	if os.Getenv("TEST_MAIN") == "1" {
+		logger.Logger.Info("Running in TEST_MAIN mode. Exiting early.")
+		os.Exit(0)
+	}
+
 	// Retrieve project existence using migration package.
 	exists, err := migration.ProjectExists(opts)
 	if err != nil || !exists {
